@@ -1,67 +1,237 @@
-[Uploading README.md…]()
-# Handoff: Stride — AI Marathon Coach (real Garmin + Strava integrations)
+# Stride — AI marathon coach
 
-## Overview
-Stride is an AI marathon coach for a runner training for the London Marathon (26 Apr 2027, goal 3:30, recent half 1:45). It builds a personalised plan, adapts it after every synced run, and includes HR zones, workout details, progress tracking, recovery monitoring, race readiness, a post-run survey, and an AI coach chat. The bundled prototype simulates all data; this handoff describes building the real product with live Garmin and Strava integrations.
+A marathon coach that builds a plan from your real training history, reshapes it after every
+run you post to Strava, softens sessions when Garmin says you haven't recovered, and explains
+every change in the coach's own words.
 
-## About the Design Files
-`Marathon Coach.dc.html` is a **design reference created in HTML** — a working prototype showing intended look and behavior, not production code. Recreate it in the target codebase's environment (or pick the most appropriate stack if none exists — a React/Next.js web app with a Node backend is a natural fit given OAuth requirements). The `.dc.html` file contains the full template (inline-styled HTML) and a logic class with all demo data, copy, and interaction handlers — treat it as the source of truth for layout, copy, and colors.
+Built to the design in [`design/Marathon Coach.dc.html`](design/Marathon%20Coach.dc.html); the
+original handoff brief is kept at [`design/HANDOFF.md`](design/HANDOFF.md).
 
-## Fidelity
-**High-fidelity.** Colors, typography, spacing, copy, and interactions are final. Recreate pixel-perfectly.
+## Stack
 
-## Design Tokens (dark theme)
-- Page background: #121814 · Card: #1C2620 · Card border: #2E3B33 · Raised/hover: #26302A
-- Text primary: #E8EDE9 · Secondary: #A9B7AE · Muted: #8A968D
-- Accent green (buttons/brand): #1F4D3A (hover #16382A) · Accent text/mint: #7FB89A · User chat bubble: #2E6B4F
-- Success surface: #1F3A2D (border #2E5240) · Warning: #E3B34C on #3A311A / card #332B18 (border #4D3F1E)
-- Zone colors: Z1 #B9C7BE, Z2 #7FB89A, Z3 #E3B34C, Z4 #D97B4F, Z5 #C24A3D
-- Brand chips: Garmin #0A2540, Strava #FC4C02 (Strava badge bg #3A241A)
-- Today-card highlight: bg #243129, border #7FB89A
-- Fonts: 'Spectral' (serif, headings, weight 500) + 'Public Sans' (UI). Radii: cards 12–16px, buttons 8–10px.
+- **Next.js 15** (App Router) + React 19, TypeScript
+- **Turso / libSQL** — SQLite over HTTP, so the data survives a serverless filesystem; holds per-user plans, activities, recovery, surveys, chat and OAuth tokens
+- **Strava API** — OAuth 2.0, webhook event subscription, activity + stream ingest
+- **Garmin Health API** — OAuth 2.0 with PKCE, push notifications, backfill, pull fallback
+- **Anthropic API** (`claude-opus-5`) — the coach chat, with live athlete state in the prompt
 
-## Screens
-All screens live in one app shell: sticky header with logo, tab nav (Plan, Today's workout, HR zones, Progress, Recovery, Race readiness, Run log, Coach) and a "Sync Strava" button.
+No demo data anywhere: every number on every screen is computed from what the providers return.
 
-1. **Onboarding (3 steps)** — goal confirmation; connect Garmin + Strava (OAuth dialogs); HR zone review. Continue is disabled until both providers connect.
-2. **Plan** — 7-day week grid with prev/next week navigation (arrows), phase label, and a block-overview table (Base → Build → Strength → Sharpen → Peak 90–100 km → Taper). Adapted sessions carry an amber ADAPTED badge; every day card is clickable.
-3. **Today's workout / day detail** — segments list (warm-up, reps, recoveries, cool-down) with per-segment pace/zone targets, plus a dark SESSION TARGETS panel (distance, duration, zone, HR, pace) and a coach note. Upcoming days are labeled "UPCOMING".
-4. **HR zones** — 5 zones anchored to LTHR (prototype: 168 bpm, max 192) with bpm ranges, pace ranges, purpose. Must recalibrate from real watch data.
-5. **Progress** — 8 stat cards (weekly volume, avg easy-run HR, threshold pace, plan adherence, resting HR, VO2 max, 7-day training load, cadence), weekly-volume bar chart, recent runs table with STRAVA badges.
-6. **Recovery** — recovery score panel, 4 metric cards (sleep, sleep score, HRV, body battery), 7-night sleep chart, and an auto-adjustment card: poor recovery softens the next day's session (injury prevention).
-7. **Race readiness** — projected finish time, readiness % bar, days to race, factors table (recent half, threshold pace, this week's + 4-week volume, long-run endurance, goal pace vs threshold), milestone cards (10K time trial, tune-up half, 32 km dress rehearsal).
-8. **Run log** — list of past runs with feedback status; run detail shows watch data plus a survey: overall feel (Great/Good/OK/Rough), RPE 1–10, free-text notes. Survey answers feed the adaptation algorithm.
-9. **Coach chat** — chat UI with typing indicator; user bubbles right/green, coach bubbles left/grey.
+## Quick start
 
-## Integrations to build (the core of this handoff)
+```bash
+npm install
+cp .env.example .env.local     # fill in the values below
+npm run dev                    # http://localhost:3000
+```
 
-### Strava (activity ingest — drives plan adaptation)
-- OAuth 2.0 authorization code flow (`https://www.strava.com/oauth/authorize`, scopes `activity:read_all`). Store refresh tokens server-side; refresh access tokens on expiry.
-- Subscribe to Strava **webhook events** so every posted run arrives immediately; fall back to polling `/athlete/activities`.
-- On each new run: pull distance, moving time, splits, average/max HR, cadence; run the adaptation engine; surface changes as ADAPTED badges + a coach explanation message (see Behavior below).
+For local work you can skip Turso entirely and point the database at a file:
 
-### Garmin (physiology + recovery)
-- Garmin Health API / Connect Developer Program (requires an approved developer account). Pull: workouts, HR time series, resting HR, HRV (overnight), sleep duration + sleep score, body battery, VO2 max.
-- Recompute HR zones when LTHR/max HR estimates move.
-- Nightly recovery check: if HRV is meaningfully below baseline or sleep is short (prototype heuristic: HRV −14 ms vs baseline, sleep < ~6.5h), soften the next day's session (cap HR, trim volume) and show the amber "Tomorrow's session softened" card.
+```
+TURSO_DATABASE_URL=file:./data/stride.db
+```
 
-### AI coach
-- The prototype calls an LLM with a rich system prompt (see `coachSystem()` in the logic class — reuse it verbatim as a starting point). Persona: 30-year veteran coach; one clear recommendation; no hedging; precise physiology. Inject live athlete state (current week, recent runs, recovery, survey feedback) into the prompt.
-- Production: server-side Anthropic API call; keep chat history per user.
+The schema is created on the first query, so there is no migration step to run.
 
-## Interactions & Behavior
-- **Sync flow**: new Strava run → adaptation engine compares actual vs planned (e.g. avg HR 152 on a Z2 day) → adjusts upcoming sessions (trim reps, cap HR, extend long run when aerobic load is absorbed well) → green banner ("Plan updated…"), ADAPTED badges on changed days, and an auto coach chat message explaining each change.
-- **Week navigation**: future weeks are projections labeled "Projected — will adjust to how the weeks before actually go."
-- **Day cards**: click → that day's full workout detail. "Today's workout" tab resets to today.
-- **Survey**: saving marks the run "LOGGED ✓" and the feedback weighs into adaptation (e.g. high RPE on an easy run → same signal as elevated HR).
-- **OAuth dialogs** (prototype simulates): branded header, signed-in account row, scope list, Cancel/Authorize, busy state ~1.3s.
-- Chat: Enter sends; typing indicator pulses while awaiting the model.
+Sign in with an email address, then work through onboarding: confirm the goal, connect Garmin
+and Strava, review the heart-rate zones, and the plan is generated from your Strava history.
 
-## State Management
-Per-user server state: athlete profile (goal race/time, LTHR, max HR), plan (36 weeks, phase structure), per-day workouts with adapted flags + reasons, activities (from Strava/Garmin), recovery metrics history, surveys keyed by activity, chat history, OAuth tokens. Client state mirrors the prototype's logic class: active tab, selected week/day, selected run, survey draft, chat input/thinking.
+For local work without provider credentials, set `ALLOW_SKIP_CONNECT=true` to let onboarding
+past the connect step. The app then runs with an empty history until you connect something.
 
-## Assets
-No image assets. Fonts via Google Fonts (Spectral, Public Sans). Provider marks (Garmin/Strava) are lettermark placeholders in the prototype — use official brand assets per each API's brand guidelines in production.
+## Provider setup
 
-## Files
-- `Marathon Coach.dc.html` — the full prototype: template (all screens, inline styles, exact copy) + logic class (demo data, zone tables, plan generator `futureWeek()`, adaptation examples `adaptedWeek()`, workout builder `workoutFromDay()`, coach system prompt `coachSystem()`).
+### Strava
+
+1. Create an application at <https://www.strava.com/settings/api>.
+2. Set **Authorization Callback Domain** to the host of your `APP_URL` (e.g. `stride.example.com`,
+   or `localhost` in development).
+3. Put the client id and secret in `STRAVA_CLIENT_ID` / `STRAVA_CLIENT_SECRET`.
+4. Stride requests the `activity:read_all` scope — the athlete must leave every box ticked, or
+   private runs never arrive. The callback checks this and says so if a scope is missing.
+5. Create the webhook subscription once the app is deployed and publicly reachable:
+
+   ```bash
+   npm run strava:subscribe      # POSTs the callback URL to Strava
+   npm run strava:subscription   # shows the current subscription
+   npm run strava:unsubscribe -- <id>
+   ```
+
+   Strava immediately GETs `APP_URL/api/strava/webhook` with a `hub.challenge`, which the route
+   echoes back when `hub.verify_token` matches `STRAVA_VERIFY_TOKEN`. From then on every posted
+   run arrives as a POST within seconds: the event is stored, acknowledged inside Strava's
+   two-second window, then the activity is fetched, imported, and run through the adaptation
+   engine. `POST /api/strava/sync` (the "Sync Strava" button) is the polling fallback and the
+   path used for the initial history import.
+
+### Garmin
+
+Garmin Health API access requires an approved account in the
+[Connect Developer Program](https://developer.garmin.com/gc-developer-program/) — apply first;
+there is no self-serve key.
+
+1. Register `APP_URL/api/garmin/callback` as the OAuth redirect URI.
+2. Register `APP_URL/api/garmin/webhook` as the push notification endpoint for the summary types
+   you are granted (dailies, sleeps, HRV, user metrics).
+3. Put the consumer key and secret in `GARMIN_CLIENT_ID` / `GARMIN_CLIENT_SECRET`.
+
+The connect flow is OAuth 2.0 with PKCE (`connect.garmin.com/oauth2Confirm` →
+`diauth.garmin.com/di-oauth2-service/oauth/token`), after which Stride reads the athlete's Garmin
+user id and keys push notifications on it. On connect it requests a 90-day backfill of dailies and
+sleeps and pulls whatever Garmin already holds. Access tokens refresh automatically.
+
+Garmin only retains seven days of data, so `scripts/nightly.ts` should run daily.
+
+### The coach
+
+Set `ANTHROPIC_API_KEY`. The coach runs `claude-opus-5` with adaptive thinking, and the persona
+prompt is regenerated on every message with the athlete's live state — this week's sessions and
+which were adapted and why, the last eight runs with heart rate and survey feedback, last night's
+sleep and HRV against baseline, adherence, zones, and the current finish projection. Without a key
+the chat says so plainly rather than pretending.
+
+## How the plan works
+
+**Generation** (`src/lib/plan.ts`). Weeks are counted back from race day and mapped onto the
+canonical phase shape (Prep → Base → Build → Strength → Sharpen → Peak → Taper), scaled to
+however many weeks the athlete actually has. Volume starts at their real four-week Strava average
+and ramps to a peak that is the lower of what the goal time needs and what a safe ~5.5%/week build
+can reach, with a down week every fourth week and a three-week taper. The long run's share of the
+week climbs through the block and is capped at 32 km. Interval sessions carry a whole number of
+reps, and the session distance is whatever those reps plus warm-up and cool-down come to.
+
+**Adaptation** (`src/lib/adapt.ts`) runs after every new activity, every recovery update, and every
+survey. Four rules, in priority order, each of which records the reason that produced it:
+
+1. **Poor overnight recovery** (HRV ≥10 ms below the 30-day baseline, or under 6.5 h sleep, or a
+   recovery score below 65) softens tomorrow — a quality session becomes an easy run, an easy run
+   is trimmed and heart-rate capped.
+2. **A run that came in hot** — average heart rate above the Zone 2 ceiling on an easy day, or
+   RPE ≥7 / "Rough" in the survey — drops a rep from the next quality session and puts a heart-rate
+   cap on the next easy run.
+3. **Load absorbed well** — last week's adherence ≥90%, easy heart rate inside Zone 2, recovery
+   fine — pulls the long-run progression forward by up to 10%.
+4. **Adherence under 60%** eases next week's volume by 10%.
+
+No session is changed by more than one rule per pass. Each pass writes an `adaptations` row (the
+green banner), sets the ADAPTED badge and reason on each changed day, and posts a coach message
+that attributes each change to the signal that caused it.
+
+**Zones** (`src/lib/zones.ts`) are a five-zone LTHR model with contiguous bpm bands and pace bands
+anchored on the athlete's measured threshold pace. Max HR is recalibrated from watch data after
+every sync, and LTHR follows it.
+
+**Race readiness** (`src/lib/metrics.ts`) projects the finish with Riegel from the best recent
+effort, and blends speed evidence, four-week volume, long-run endurance and consistency into the
+readiness percentage.
+
+## Scheduled work
+
+```
+0 5 * * *   cd /srv/stride && npm run nightly
+```
+
+Pulls Garmin recovery for every connected athlete, polls Strava as a webhook fallback,
+recalibrates zones, and runs the adaptation engine.
+
+On a host with no cron shell (Vercel and friends), `POST /api/cron/nightly` does the same work.
+It is guarded by `CRON_SECRET` and expects that value as a bearer token:
+
+```
+curl -X POST https://stride.example.com/api/cron/nightly \
+  -H "Authorization: Bearer $CRON_SECRET"
+```
+
+The route refuses to run at all when `CRON_SECRET` is unset, so an unconfigured deployment
+cannot be triggered by anyone who finds the URL.
+
+## API surface
+
+| Route | Purpose |
+| --- | --- |
+| `POST /api/auth/signin`, `/signout` | Session cookie (HMAC-signed) |
+| `GET /api/state` | Everything the client renders |
+| `POST /api/onboarding/complete` | Estimate zones, build the plan, greet the athlete |
+| `POST /api/profile` | Change race, date, goal time, zone anchors; rebuilds the plan |
+| `GET /api/strava/authorize`, `/callback` | OAuth 2.0 code flow + history import |
+| `POST /api/strava/sync` | Manual/polling activity sync |
+| `GET|POST /api/strava/webhook` | Subscription validation + event delivery |
+| `GET|POST|DELETE /api/strava/subscription` | Manage the push subscription |
+| `GET /api/garmin/authorize`, `/callback` | OAuth 2.0 + PKCE, backfill request |
+| `POST /api/garmin/sync`, `/backfill` | Manual recovery pull, historic replay |
+| `POST /api/garmin/webhook` | Health API push notifications |
+| `GET /api/workout?date=` | Full session detail for one day |
+| `GET /api/runs/[id]`, `POST /api/runs/[id]/survey` | Watch data and post-run survey |
+| `POST /api/coach/chat` | The coach |
+| `POST /api/plan/rebuild`, `/api/banner/dismiss` | Regenerate the plan, dismiss the banner |
+
+## Environment
+
+See [`.env.example`](.env.example). `APP_URL` must be the exact public origin the OAuth redirect
+URIs are registered against, and must be reachable for webhooks to arrive. `APP_SECRET` (32+ random
+characters) is required in production, and `CRON_SECRET` guards the nightly route.
+
+## Deploying to Vercel
+
+Vercel runs the App Router natively, so `after()` in the webhook routes and the
+scheduled job both work without adaptation. The one thing that does not survive is a
+database on disk: function filesystems are read-only apart from an ephemeral `/tmp`,
+which is why the store is Turso rather than a SQLite file.
+
+1. **Create the database** and keep the two values it prints:
+
+   ```bash
+   turso db create stride
+   turso db show stride --url        # -> TURSO_DATABASE_URL
+   turso db tokens create stride     # -> TURSO_AUTH_TOKEN
+   ```
+
+2. **Import the repo** at <https://vercel.com/new>. Vercel detects Next.js on its own —
+   leave the build command, output directory and root directory as they come.
+
+3. **Set the environment variables** (Project → Settings → Environment Variables) for
+   every key in `.env.example` that you use. `APP_URL` must be the deployment's real
+   origin, e.g. `https://stride.vercel.app`, and `APP_SECRET` and `CRON_SECRET` must
+   both be set. Apply them to Production at minimum; Preview too if you want preview
+   deployments to work, though they will share the same database unless you give them
+   their own `TURSO_DATABASE_URL`.
+
+4. **Repoint Strava** once the deployment is live:
+   - set the app's **Authorization Callback Domain** to the deployment host
+     (`vercel.app`, or your custom domain) at <https://www.strava.com/settings/api>
+   - re-register the webhook, because the old subscription still points at the previous
+     origin:
+
+     ```bash
+     npm run strava:unsubscribe
+     npm run strava:subscribe
+     ```
+
+### The nightly job on Vercel
+
+[`vercel.json`](vercel.json) schedules `/api/cron/nightly` at 05:00 UTC. Vercel invokes it
+with a GET and, whenever `CRON_SECRET` is set, sends that value as an `Authorization:
+Bearer` header — which is exactly what the route already checks, so no glue code is
+needed. The route answers POST as well, so a systemd timer, a GitHub Action or a plain
+curl can trigger the same work:
+
+```bash
+curl -X POST https://stride.vercel.app/api/cron/nightly \
+  -H "Authorization: Bearer $CRON_SECRET"
+```
+
+The route refuses to run at all when `CRON_SECRET` is unset, so an unconfigured
+deployment cannot be triggered by whoever finds the URL.
+
+Two things to know about Vercel's scheduler on the Hobby plan: cron jobs may only run
+**once a day** (a more frequent expression fails the deploy), and an invocation lands
+somewhere inside the scheduled hour rather than on the minute. Both are fine for an
+overnight recovery check. The job is also idempotent — a second run in the same day
+makes no further changes — which matters because cron delivery is best-effort and can
+occasionally fire twice or not at all.
+
+## Running it anywhere else
+
+Nothing here is Vercel-specific beyond `vercel.json`. On a host with a persistent disk
+(Fly.io, Render, a VPS) you can point `TURSO_DATABASE_URL` at a local file —
+`file:./data/stride.db` — and run `npm run nightly` from cron instead.
