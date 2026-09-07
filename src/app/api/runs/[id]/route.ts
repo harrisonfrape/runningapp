@@ -13,7 +13,7 @@ export async function GET(_req: Request, ctx: { params: Promise<{ id: string }> 
     const user = await requireUser();
     const { id } = await ctx.params;
     const d = getDb();
-    const a = d
+    const a = await d
       .prepare(
         `SELECT id, provider, external_id, name, start_date, distance_m, moving_time_s,
                 average_hr, max_hr, average_cadence, zone_seconds_json, type
@@ -22,11 +22,11 @@ export async function GET(_req: Request, ctx: { params: Promise<{ id: string }> 
       .get(Number(id), user.id) as ActivityRow | undefined;
     if (!a) return json({ error: "Run not found" }, { status: 404 });
 
-    const survey = d
+    const survey = await d
       .prepare("SELECT feel, rpe, notes FROM surveys WHERE activity_id = ?")
       .get(a.id) as { feel: string; rpe: number; notes: string } | undefined;
 
-    const zones = zonesFor(user.id);
+    const zones = await zonesFor(user.id);
     let z2 = "—";
     if (a.zone_seconds_json) {
       const seconds = JSON.parse(a.zone_seconds_json) as Record<string, number>;

@@ -6,11 +6,11 @@ import { estimateLthrFromMax } from "./zones";
 import { appendMessage, welcomeMessage } from "./coach";
 
 /** Inputs for the generator, measured from the athlete's real Strava history. */
-export function planInputFor(userId: number): PlanInput {
+export async function planInputFor(userId: number): Promise<PlanInput> {
   const t = todayIso();
-  const profile = getProfile(userId);
-  const four = fourWeekAverage(userId, t);
-  const longest = longestRun(userId, t);
+  const profile = await getProfile(userId);
+  const four = await fourWeekAverage(userId, t);
+  const longest = await longestRun(userId, t);
   return {
     planStart: profile.plan_start ?? mondayOf(t),
     raceDate: profile.race_date,
@@ -26,46 +26,48 @@ export function planInputFor(userId: number): PlanInput {
  * everything from today forward is regenerated from current fitness, then the
  * adaptation engine layers its changes back on top.
  */
-export function buildPlan(userId: number, { fresh = false } = {}): number {
+export async function buildPlan(userId: number, { fresh = false } = {}): Promise<number> {
   const d = getDb();
   const t = todayIso();
-  const profile = getProfile(userId);
+  const profile = await getProfile(userId);
   if (!profile.plan_start) {
-    d.prepare("UPDATE profiles SET plan_start = ? WHERE user_id = ?").run(mondayOf(t), userId);
+    await d.prepare("UPDATE profiles SET plan_start = ? WHERE user_id = ?").run(mondayOf(t), userId);
   }
-  const input = planInputFor(userId);
+  const input = await planInputFor(userId);
   const days = generatePlan(input);
 
-  const insert = d.prepare(
-    `INSERT INTO plan_days (user_id, date, week, day_idx, phase, type, title, sub, km, zone)
+  const INSERT = `INSERT INTO plan_days (user_id, date, week, day_idx, phase, type, title, sub, km, zone)
      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
      ON CONFLICT(user_id, date) DO UPDATE SET
        week = excluded.week, day_idx = excluded.day_idx, phase = excluded.phase,
        type = excluded.type, title = excluded.title, sub = excluded.sub,
-       km = excluded.km, zone = excluded.zone, adapted = 0, adapt_reason = NULL, hr_cap = NULL`,
-  );
+       km = excluded.km, zone = excluded.zone, adapted = 0, adapt_reason = NULL, hr_cap = NULL`;
 
-  const tx = d.transaction(() => {
-    if (fresh) d.prepare("DELETE FROM plan_days WHERE user_id = ?").run(userId);
-    else d.prepare("DELETE FROM plan_days WHERE user_id = ? AND date >= ?").run(userId, t);
-    for (const day of days) {
-      if (!fresh && day.date < t) continue;
-      insert.run(
-        userId,
-        day.date,
-        day.week,
-        day.dayIdx,
-        day.phase,
-        day.type,
-        day.title,
-        day.sub,
-        day.km,
-        day.zone,
-      );
-    }
-  });
-  tx();
-  matchActivitiesToPlan(userId);
+  // One atomic batch: the delete and every insert land together, so a failure
+  // part-way through can never leave the athlete with half a plan.
+  await d.batch([
+    fresh
+      ? { sql: "DELETE FROM plan_days WHERE user_id = ?", args: [userId] }
+      : { sql: "DELETE FROM plan_days WHERE user_id = ? AND date >= ?", args: [userId, t] },
+    ...days
+      .filter((day) => fresh || day.date >= t)
+      .map((day) => ({
+        sql: INSERT,
+        args: [
+          userId,
+          day.date,
+          day.week,
+          day.dayIdx,
+          day.phase,
+          day.type,
+          day.title,
+          day.sub,
+          day.km,
+          day.zone,
+        ],
+      })),
+  ]);
+  await matchActivitiesToPlan(userId);
   return days.length;
 }
 
@@ -73,13 +75,15 @@ export function buildPlan(userId: number, { fresh = false } = {}): number {
  * Estimate zone anchors from watch data. Real max HR from recent activities is
  * the best signal available before a field test; LTHR follows from it.
  */
-export function estimateZoneAnchors(userId: number): { lthr: number; maxHr: number; estimated: boolean } {
+export async function estimateZoneAnchors(
+  userId: number,
+): Promise<{ lthr: number; maxHr: number; estimated: boolean }> {
   const d = getDb();
-  const profile = getProfile(userId);
+  const profile = await getProfile(userId);
   if (profile.lthr && profile.max_hr) {
     return { lthr: profile.lthr, maxHr: profile.max_hr, estimated: false };
   }
-  const row = d
+  const row = await d
     .prepare("SELECT MAX(max_hr) AS max_hr FROM activities WHERE user_id = ? AND max_hr IS NOT NULL")
     .get(userId) as { max_hr: number | null };
   // The highest beat ever recorded is only a max if the athlete actually went
@@ -90,7 +94,7 @@ export function estimateZoneAnchors(userId: number): { lthr: number; maxHr: numb
   const observed = row.max_hr ? Math.round(row.max_hr) : null;
   const maxHr = Math.max(observed ?? 0, estimate);
   const lthr = estimateLthrFromMax(maxHr);
-  d.prepare("UPDATE profiles SET lthr = COALESCE(lthr, ?), max_hr = COALESCE(max_hr, ?) WHERE user_id = ?").run(
+  await d.prepare("UPDATE profiles SET lthr = COALESCE(lthr, ?), max_hr = COALESCE(max_hr, ?) WHERE user_id = ?").run(
     lthr,
     maxHr,
     userId,
@@ -99,14 +103,14 @@ export function estimateZoneAnchors(userId: number): { lthr: number; maxHr: numb
 }
 
 /** Marks onboarding complete: build the plan, set zones, greet the athlete. */
-export function completeOnboarding(userId: number) {
+export async function completeOnboarding(userId: number) {
   const d = getDb();
-  estimateZoneAnchors(userId);
-  recalibrateZones(userId);
-  buildPlan(userId, { fresh: true });
-  d.prepare("UPDATE profiles SET onboarded = 1 WHERE user_id = ?").run(userId);
-  const hasChat = d
+  await estimateZoneAnchors(userId);
+  await recalibrateZones(userId);
+  await buildPlan(userId, { fresh: true });
+  await d.prepare("UPDATE profiles SET onboarded = 1 WHERE user_id = ?").run(userId);
+  const hasChat = await d
     .prepare("SELECT COUNT(*) AS n FROM chat_messages WHERE user_id = ?")
     .get(userId) as { n: number };
-  if (hasChat.n === 0) appendMessage(userId, "coach", welcomeMessage(userId));
+  if (hasChat.n === 0) await appendMessage(userId, "coach", await welcomeMessage(userId));
 }

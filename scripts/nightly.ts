@@ -16,7 +16,7 @@ import { syncActivities } from "../src/lib/strava";
 
 async function main() {
   const d = getDb();
-  const users = d.prepare("SELECT id, email FROM users").all() as Array<{
+  const users = (await d.prepare("SELECT id, email FROM users").all()) as Array<{
     id: number;
     email: string;
   }>;
@@ -29,7 +29,7 @@ async function main() {
 
   for (const user of users) {
     const connected = new Set(
-      (providers.all(user.id) as Array<{ provider: string }>).map((r) => r.provider),
+      (((await providers.all(user.id)) as Array<{ provider: string }>)).map((r) => r.provider),
     );
     console.log(`\n${user.email}`);
 
@@ -54,8 +54,8 @@ async function main() {
     }
 
     try {
-      if (recalibrateZones(user.id)) console.log("  zones   recalibrated");
-      const adaptation = runAdaptation(user.id, "recovery");
+      if (await recalibrateZones(user.id)) console.log("  zones   recalibrated");
+      const adaptation = await runAdaptation(user.id, "recovery");
       console.log(
         adaptation.changes.length
           ? `  plan    ${adaptation.summary}`

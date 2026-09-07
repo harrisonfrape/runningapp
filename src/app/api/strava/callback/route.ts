@@ -19,10 +19,10 @@ export async function GET(req: Request) {
   if (!code || !state) return back({ connect: "strava", status: "invalid" });
 
   const d = getDb();
-  const row = d
+  const row = await d
     .prepare("SELECT user_id FROM oauth_states WHERE state = ? AND provider = 'strava'")
     .get(state) as { user_id: number } | undefined;
-  d.prepare("DELETE FROM oauth_states WHERE state = ?").run(state);
+  await d.prepare("DELETE FROM oauth_states WHERE state = ?").run(state);
   if (!row) return back({ connect: "strava", status: "expired" });
 
   const cfg = stravaConfig();
@@ -30,26 +30,26 @@ export async function GET(req: Request) {
 
   try {
     const tokens = await exchangeCode(cfg, code);
-    saveTokens(row.user_id, tokens, scope);
+    await saveTokens(row.user_id, tokens, scope);
     if (!scope.includes("activity:read")) {
       return back({ connect: "strava", status: "scope" });
     }
     // Import the athlete's history — this is what the first plan is built from.
     await syncActivities(row.user_id);
-    estimateZoneAnchors(row.user_id);
-    recalibrateZones(row.user_id);
+    await estimateZoneAnchors(row.user_id);
+    await recalibrateZones(row.user_id);
     // During onboarding the plan is generated at the end of the flow. An
     // athlete connecting Strava later already has one, and it was built from a
     // baseline that has just been replaced by their real history — so rebuild
     // the weeks ahead and let the engine re-apply its adjustments.
-    if (getProfile(row.user_id).onboarded === 1) {
-      buildPlan(row.user_id);
-      runAdaptation(row.user_id, "activity");
+    if ((await getProfile(row.user_id)).onboarded === 1) {
+      await buildPlan(row.user_id);
+      await runAdaptation(row.user_id, "activity");
     }
     return back({ connect: "strava", status: "ok" });
   } catch (err) {
     console.error("[stride] strava callback", err);
-    d.prepare(
+    await d.prepare(
       `INSERT INTO sync_state (user_id, provider, last_error) VALUES (?, 'strava', ?)
        ON CONFLICT(user_id, provider) DO UPDATE SET last_error = excluded.last_error`,
     ).run(row.user_id, err instanceof Error ? err.message : "unknown");

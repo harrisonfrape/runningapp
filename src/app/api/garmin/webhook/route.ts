@@ -38,18 +38,18 @@ export async function POST(req: Request) {
   }
 
   const d = getDb();
-  const info = d
+  const info = await d
     .prepare("INSERT INTO webhook_events (provider, payload) VALUES ('garmin', ?)")
     .run(JSON.stringify(body));
   const eventId = Number(info.lastInsertRowid);
 
-  after(() => {
+  after(async () => {
     try {
-      const touched = ingest(body);
-      for (const userId of touched) runAdaptation(userId, "recovery");
-      d.prepare("UPDATE webhook_events SET processed = 1 WHERE id = ?").run(eventId);
+      const touched = await ingest(body);
+      for (const userId of touched) await runAdaptation(userId, "recovery");
+      await d.prepare("UPDATE webhook_events SET processed = 1 WHERE id = ?").run(eventId);
     } catch (err) {
-      d.prepare("UPDATE webhook_events SET error = ? WHERE id = ?").run(
+      await d.prepare("UPDATE webhook_events SET error = ? WHERE id = ?").run(
         err instanceof Error ? err.message : "unknown",
         eventId,
       );
@@ -61,42 +61,42 @@ export async function POST(req: Request) {
 }
 
 /** Group each summary type by athlete, then ingest per athlete. */
-function ingest(body: PushBody): Set<number> {
+async function ingest(body: PushBody): Promise<Set<number>> {
   const touched = new Set<number>();
   const d = getDb();
 
-  const byUser = <T extends Summary>(rows: T[] | undefined) => {
+  const byUser = async <T extends Summary>(rows: T[] | undefined) => {
     const map = new Map<number, T[]>();
     for (const row of rows ?? []) {
       if (!row.userId) continue;
-      const userId = userIdForGarminUser(row.userId);
+      const userId = await userIdForGarminUser(row.userId);
       if (userId === null) continue;
       map.set(userId, [...(map.get(userId) ?? []), row]);
     }
     return map;
   };
 
-  for (const [userId, rows] of byUser(body.dailies)) {
-    ingestDailies(userId, rows);
+  for (const [userId, rows] of await byUser(body.dailies)) {
+    await ingestDailies(userId, rows);
     touched.add(userId);
   }
-  for (const [userId, rows] of byUser(body.sleeps)) {
-    ingestSleeps(userId, rows);
+  for (const [userId, rows] of await byUser(body.sleeps)) {
+    await ingestSleeps(userId, rows);
     touched.add(userId);
   }
-  for (const [userId, rows] of byUser(body.hrv ?? body.hrvSummaries)) {
-    ingestHrv(userId, rows);
+  for (const [userId, rows] of await byUser(body.hrv ?? body.hrvSummaries)) {
+    await ingestHrv(userId, rows);
     touched.add(userId);
   }
-  for (const [userId, rows] of byUser(body.userMetrics)) {
-    ingestUserMetrics(userId, rows);
+  for (const [userId, rows] of await byUser(body.userMetrics)) {
+    await ingestUserMetrics(userId, rows);
     touched.add(userId);
   }
-  for (const [userId] of byUser(body.deregistrations)) {
-    d.prepare("DELETE FROM oauth_tokens WHERE user_id = ? AND provider = 'garmin'").run(userId);
+  for (const [userId] of await byUser(body.deregistrations)) {
+    await d.prepare("DELETE FROM oauth_tokens WHERE user_id = ? AND provider = 'garmin'").run(userId);
   }
   for (const userId of touched) {
-    d.prepare(
+    await d.prepare(
       `INSERT INTO sync_state (user_id, provider, last_sync, last_error) VALUES (?, 'garmin', datetime('now'), NULL)
        ON CONFLICT(user_id, provider) DO UPDATE SET last_sync = excluded.last_sync, last_error = NULL`,
     ).run(userId);

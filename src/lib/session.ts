@@ -65,7 +65,7 @@ export interface User {
 export async function requireUser(): Promise<User> {
   const id = await currentUserId();
   if (id === null) throw new UnauthorizedError();
-  const row = getDb().prepare("SELECT id, email, name FROM users WHERE id = ?").get(id) as
+  const row = await getDb().prepare("SELECT id, email, name FROM users WHERE id = ?").get(id) as
     | User
     | undefined;
   if (!row) throw new UnauthorizedError();
@@ -80,15 +80,15 @@ export class UnauthorizedError extends Error {
 }
 
 /** Creates the user (and a default London Marathon profile) on first sign-in. */
-export function upsertUser(email: string, name: string): User {
+export async function upsertUser(email: string, name: string): Promise<User> {
   const d = getDb();
-  const existing = d.prepare("SELECT id, email, name FROM users WHERE email = ?").get(email) as
+  const existing = await d.prepare("SELECT id, email, name FROM users WHERE email = ?").get(email) as
     | User
     | undefined;
   if (existing) return existing;
-  const info = d.prepare("INSERT INTO users (email, name) VALUES (?, ?)").run(email, name);
+  const info = await d.prepare("INSERT INTO users (email, name) VALUES (?, ?)").run(email, name);
   const id = Number(info.lastInsertRowid);
-  d.prepare(
+  await d.prepare(
     `INSERT INTO profiles (user_id, race_name, race_date, goal_seconds, onboarded)
      VALUES (?, ?, ?, ?, 0)`,
   ).run(

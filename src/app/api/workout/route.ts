@@ -19,12 +19,12 @@ export async function GET(req: Request) {
     const url = new URL(req.url);
     const t = todayIso();
     const date = url.searchParams.get("date") ?? t;
-    const day = getDb()
+    const day = await getDb()
       .prepare("SELECT * FROM plan_days WHERE user_id = ? AND date = ?")
       .get(user.id, date) as PlanDayRow | undefined;
     if (!day) return json({ error: "No session planned for that day" }, { status: 404 });
 
-    const targets = sessionTargets(user.id, day);
+    const targets = await sessionTargets(user.id, day);
     return json({
       date: day.date,
       dateLabel: `${DAY_NAMES_FULL[day.day_idx]} · WEEK ${day.week} · ${day.phase.toUpperCase()} PHASE · ${
@@ -39,7 +39,7 @@ export async function GET(req: Request) {
       hr: targets.hr,
       pace: targets.pace,
       coachNote: coachNoteFor(day.type),
-      segments: segmentsFor(user.id, day),
+      segments: await segmentsFor(user.id, day),
     });
   } catch (err) {
     return handleError(err);

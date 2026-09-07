@@ -8,8 +8,8 @@ export async function POST() {
   try {
     const user = await requireUser();
     const result = await syncActivities(user.id);
-    recalibrateZones(user.id);
-    const adaptation = result.imported > 0 ? runAdaptation(user.id, "activity") : null;
+    await recalibrateZones(user.id);
+    const adaptation = result.imported > 0 ? await runAdaptation(user.id, "activity") : null;
     return json({
       ok: true,
       imported: result.imported,

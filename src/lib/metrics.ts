@@ -17,8 +17,8 @@ export interface ActivityRow {
   type: string;
 }
 
-export function activitiesSince(userId: number, sinceIso: string): ActivityRow[] {
-  return getDb()
+export async function activitiesSince(userId: number, sinceIso: string): Promise<ActivityRow[]> {
+  return await getDb()
     .prepare(
       `SELECT id, provider, external_id, name, start_date, distance_m, moving_time_s,
               average_hr, max_hr, average_cadence, zone_seconds_json, type
@@ -27,8 +27,8 @@ export function activitiesSince(userId: number, sinceIso: string): ActivityRow[]
     .all(userId, sinceIso) as ActivityRow[];
 }
 
-export function recentActivities(userId: number, limit = 20): ActivityRow[] {
-  return getDb()
+export async function recentActivities(userId: number, limit = 20): Promise<ActivityRow[]> {
+  return await getDb()
     .prepare(
       `SELECT id, provider, external_id, name, start_date, distance_m, moving_time_s,
               average_hr, max_hr, average_cadence, zone_seconds_json, type
@@ -52,13 +52,13 @@ export function km(a: ActivityRow): number {
 }
 
 /** Weekly kilometres for the last `weeks` calendar weeks, oldest first. */
-export function weeklyVolumes(userId: number, weeks: number, todayIso: string) {
+export async function weeklyVolumes(userId: number, weeks: number, todayIso: string) {
   const thisMonday = mondayOf(todayIso);
   const out: Array<{ weekStart: string; km: number; runs: number }> = [];
   for (let i = weeks - 1; i >= 0; i--) {
     const start = addDays(thisMonday, -7 * i);
     const end = addDays(start, 7);
-    const row = getDb()
+    const row = await getDb()
       .prepare(
         `SELECT COALESCE(SUM(distance_m), 0) / 1000.0 AS km, COUNT(*) AS runs
          FROM activities WHERE user_id = ? AND date(start_date) >= ? AND date(start_date) < ?`,
@@ -69,8 +69,8 @@ export function weeklyVolumes(userId: number, weeks: number, todayIso: string) {
   return out;
 }
 
-export function fourWeekAverage(userId: number, todayIso: string): { km: number; runs: number } {
-  const weeks = weeklyVolumes(userId, 5, todayIso).slice(0, 4); // completed weeks only
+export async function fourWeekAverage(userId: number, todayIso: string): Promise<{ km: number; runs: number }> {
+  const weeks = (await weeklyVolumes(userId, 5, todayIso)).slice(0, 4); // completed weeks only
   if (!weeks.length) return { km: 0, runs: 0 };
   const km = weeks.reduce((a, w) => a + w.km, 0) / weeks.length;
   const runs = weeks.reduce((a, w) => a + w.runs, 0) / weeks.length;
@@ -78,8 +78,8 @@ export function fourWeekAverage(userId: number, todayIso: string): { km: number;
 }
 
 /** Average HR on easy-paced runs over the window — the aerobic-drift signal. */
-export function avgEasyHr(userId: number, todayIso: string, days = 28): number | null {
-  const rows = activitiesSince(userId, addDays(todayIso, -days)).filter(
+export async function avgEasyHr(userId: number, todayIso: string, days = 28): Promise<number | null> {
+  const rows = (await activitiesSince(userId, addDays(todayIso, -days))).filter(
     (a) => a.average_hr && km(a) >= 3,
   );
   if (!rows.length) return null;
@@ -91,15 +91,15 @@ export function avgEasyHr(userId: number, todayIso: string, days = 28): number |
   return Math.round(pool.reduce((a, r) => a + (r.average_hr ?? 0), 0) / pool.length);
 }
 
-export function avgCadence(userId: number, todayIso: string, days = 28): number | null {
-  const rows = activitiesSince(userId, addDays(todayIso, -days)).filter((a) => a.average_cadence);
+export async function avgCadence(userId: number, todayIso: string, days = 28): Promise<number | null> {
+  const rows = (await activitiesSince(userId, addDays(todayIso, -days))).filter((a) => a.average_cadence);
   if (!rows.length) return null;
   return Math.round(rows.reduce((a, r) => a + (r.average_cadence ?? 0), 0) / rows.length);
 }
 
 /** Training load: distance-weighted effort over the last 7 days (arbitrary but consistent units). */
-export function trainingLoad(userId: number, todayIso: string): number {
-  const rows = activitiesSince(userId, addDays(todayIso, -7));
+export async function trainingLoad(userId: number, todayIso: string): Promise<number> {
+  const rows = await activitiesSince(userId, addDays(todayIso, -7));
   return Math.round(
     rows.reduce((a, r) => {
       const p = paceSecPerKm(r);
@@ -110,8 +110,8 @@ export function trainingLoad(userId: number, todayIso: string): number {
 }
 
 /** Best recent performance, used as the Riegel anchor for the finish projection. */
-export function bestEffort(userId: number, todayIso: string, days = 120): ActivityRow | null {
-  const rows = activitiesSince(userId, addDays(todayIso, -days)).filter((a) => km(a) >= 5);
+export async function bestEffort(userId: number, todayIso: string, days = 120): Promise<ActivityRow | null> {
+  const rows = (await activitiesSince(userId, addDays(todayIso, -days))).filter((a) => km(a) >= 5);
   if (!rows.length) return null;
   // Riegel-equivalent marathon time; the smallest wins.
   let best: ActivityRow | null = null;
@@ -142,8 +142,8 @@ export function formatDuration(seconds: number): string {
 }
 
 /** Threshold pace measured from the athlete's own best sustained effort. */
-export function thresholdPace(userId: number, todayIso: string, goalSeconds: number): number {
-  const best = bestEffort(userId, todayIso);
+export async function thresholdPace(userId: number, todayIso: string, goalSeconds: number): Promise<number> {
+  const best = await bestEffort(userId, todayIso);
   if (!best) return thresholdPaceFromGoal(goalSeconds);
   const distKm = km(best);
   const pace = best.moving_time_s / distKm;
@@ -152,8 +152,8 @@ export function thresholdPace(userId: number, todayIso: string, goalSeconds: num
   return pace * factor;
 }
 
-export function longestRun(userId: number, todayIso: string, days = 120): ActivityRow | null {
-  const rows = activitiesSince(userId, addDays(todayIso, -days));
+export async function longestRun(userId: number, todayIso: string, days = 120): Promise<ActivityRow | null> {
+  const rows = await activitiesSince(userId, addDays(todayIso, -days));
   if (!rows.length) return null;
   return rows.reduce((a, b) => (a.distance_m > b.distance_m ? a : b));
 }
@@ -169,8 +169,8 @@ export interface RecoveryRow {
   resting_hr: number | null;
 }
 
-export function recoveryRows(userId: number, days: number, todayIso: string): RecoveryRow[] {
-  return getDb()
+export async function recoveryRows(userId: number, days: number, todayIso: string): Promise<RecoveryRow[]> {
+  return await getDb()
     .prepare(
       `SELECT date, sleep_seconds, sleep_score, hrv_ms, body_battery, resting_hr
        FROM recovery WHERE user_id = ? AND date >= ? ORDER BY date ASC`,
@@ -178,8 +178,8 @@ export function recoveryRows(userId: number, days: number, todayIso: string): Re
     .all(userId, addDays(todayIso, -days)) as RecoveryRow[];
 }
 
-export function hrvBaseline(userId: number, todayIso: string): number | null {
-  const row = getDb()
+export async function hrvBaseline(userId: number, todayIso: string): Promise<number | null> {
+  const row = await getDb()
     .prepare(
       `SELECT AVG(hrv_ms) AS avg FROM recovery
        WHERE user_id = ? AND hrv_ms IS NOT NULL AND date >= ? AND date < ?`,
@@ -206,8 +206,8 @@ export interface RecoveryAssessment {
  * Recovery score out of 100: sleep duration, Garmin's own sleep score, overnight
  * HRV against the athlete's 30-day baseline, and body battery.
  */
-export function assessRecovery(userId: number, todayIso: string): RecoveryAssessment {
-  const rows = recoveryRows(userId, 3, todayIso);
+export async function assessRecovery(userId: number, todayIso: string): Promise<RecoveryAssessment> {
+  const rows = await recoveryRows(userId, 3, todayIso);
   const latest = rows.length ? rows[rows.length - 1] : null;
   if (!latest || (latest.sleep_seconds === null && latest.hrv_ms === null)) {
     return {
@@ -226,7 +226,7 @@ export function assessRecovery(userId: number, todayIso: string): RecoveryAssess
     };
   }
 
-  const baseline = hrvBaseline(userId, todayIso);
+  const baseline = await hrvBaseline(userId, todayIso);
   const hrvDelta = latest.hrv_ms !== null && baseline !== null ? latest.hrv_ms - baseline : null;
   const sleepHours = latest.sleep_seconds !== null ? latest.sleep_seconds / 3600 : null;
 
@@ -282,14 +282,14 @@ export interface Readiness {
   note: string;
 }
 
-export function assessReadiness(
+export async function assessReadiness(
   userId: number,
   todayIso: string,
   profile: { race_date: string; goal_seconds: number },
-): Readiness {
-  const best = bestEffort(userId, todayIso);
-  const four = fourWeekAverage(userId, todayIso);
-  const longest = longestRun(userId, todayIso);
+): Promise<Readiness> {
+  const best = await bestEffort(userId, todayIso);
+  const four = await fourWeekAverage(userId, todayIso);
+  const longest = await longestRun(userId, todayIso);
   const peak = peakVolume(profile.goal_seconds, four.km || 10);
   const daysToRace = Math.max(0, daysBetween(todayIso, profile.race_date));
 
@@ -329,7 +329,7 @@ export function assessReadiness(
   factors.push({
     label: "Goal pace vs threshold pace",
     value: `${paceString(profile.goal_seconds / 42.195)} vs ${paceString(
-      thresholdPace(userId, todayIso, profile.goal_seconds),
+      await thresholdPace(userId, todayIso, profile.goal_seconds),
     )}`,
   });
 
@@ -340,7 +340,7 @@ export function assessReadiness(
   const speedIsThere =
     projectedSeconds !== null &&
     (projectedSeconds <= profile.goal_seconds * 1.05 ||
-      thresholdPace(userId, todayIso, profile.goal_seconds) < goalPace);
+      await thresholdPace(userId, todayIso, profile.goal_seconds) < goalPace);
   const note = speedIsThere
     ? `Your speed already projects ${formatDuration(projectedSeconds!)} — the whole game is volume. Get to four runs a week and hold it, and this projection will firm up fast.`
     : "Speed and endurance both still have room. Volume first, then the sharper sessions do their work.";

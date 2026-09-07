@@ -21,18 +21,18 @@ export async function POST(req: Request, ctx: { params: Promise<{ id: string }> 
       return json({ error: "RPE must be 1–10" }, { status: 400 });
     }
     const d = getDb();
-    const owns = d
+    const owns = await d
       .prepare("SELECT id FROM activities WHERE id = ? AND user_id = ?")
       .get(activityId, user.id);
     if (!owns) return json({ error: "Run not found" }, { status: 404 });
 
-    d.prepare(
+    await d.prepare(
       `INSERT INTO surveys (activity_id, user_id, feel, rpe, notes) VALUES (?, ?, ?, ?, ?)
        ON CONFLICT(activity_id) DO UPDATE SET feel = excluded.feel, rpe = excluded.rpe,
          notes = excluded.notes, created_at = datetime('now')`,
     ).run(activityId, user.id, body.feel, rpe, body.notes ?? "");
 
-    const adaptation = runAdaptation(user.id, "survey");
+    const adaptation = await runAdaptation(user.id, "survey");
     return json({ ok: true, changes: adaptation.changes, summary: adaptation.summary });
   } catch (err) {
     return handleError(err);

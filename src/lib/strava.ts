@@ -75,8 +75,8 @@ async function refresh(cfg: StravaConfig, refreshToken: string): Promise<TokenRe
   return (await res.json()) as TokenResponse;
 }
 
-export function saveTokens(userId: number, t: TokenResponse, scope = "activity:read_all") {
-  getDb()
+export async function saveTokens(userId: number, t: TokenResponse, scope = "activity:read_all") {
+  await getDb()
     .prepare(
       `INSERT INTO oauth_tokens (user_id, provider, access_token, refresh_token, expires_at, scope, external_user_id)
        VALUES (?, 'strava', ?, ?, ?, ?, ?)
@@ -94,7 +94,7 @@ export function saveTokens(userId: number, t: TokenResponse, scope = "activity:r
 export async function accessToken(userId: number): Promise<string> {
   const cfg = stravaConfig();
   if (!cfg) throw new Error("Strava is not configured (STRAVA_CLIENT_ID / STRAVA_CLIENT_SECRET)");
-  const row = getDb()
+  const row = await getDb()
     .prepare(
       "SELECT access_token, refresh_token, expires_at FROM oauth_tokens WHERE user_id = ? AND provider = 'strava'",
     )
@@ -105,7 +105,7 @@ export async function accessToken(userId: number): Promise<string> {
   const now = Math.floor(Date.now() / 1000);
   if (row.expires_at > now + 120) return row.access_token;
   const t = await refresh(cfg, row.refresh_token);
-  saveTokens(userId, t);
+  await saveTokens(userId, t);
   return t.access_token;
 }
 
@@ -184,7 +184,7 @@ export async function importActivity(
   opts: { withStreams?: boolean } = {},
 ): Promise<number | null> {
   const d = getDb();
-  const existing = d
+  const existing = await d
     .prepare(
       "SELECT id FROM activities WHERE user_id = ? AND provider = 'strava' AND external_id = ?",
     )
@@ -192,7 +192,7 @@ export async function importActivity(
 
   let zoneJson: string | null = null;
   if (opts.withStreams !== false && a.has_heartrate) {
-    const profile = d
+    const profile = await d
       .prepare("SELECT lthr, max_hr, goal_seconds FROM profiles WHERE user_id = ?")
       .get(userId) as { lthr: number | null; max_hr: number | null; goal_seconds: number } | undefined;
     if (profile?.lthr && profile.max_hr) {
@@ -211,7 +211,7 @@ export async function importActivity(
   }
 
   if (existing) {
-    d.prepare(
+    await d.prepare(
       `UPDATE activities SET name = ?, distance_m = ?, moving_time_s = ?, elapsed_time_s = ?,
          average_hr = ?, max_hr = ?, average_cadence = ?, total_elevation_m = ?,
          zone_seconds_json = COALESCE(?, zone_seconds_json), raw = ?
@@ -232,7 +232,7 @@ export async function importActivity(
     return null;
   }
 
-  const info = d
+  const info = await d
     .prepare(
       `INSERT INTO activities
         (user_id, provider, external_id, name, start_date, distance_m, moving_time_s, elapsed_time_s,
@@ -269,8 +269,8 @@ export async function syncActivities(
   const d = getDb();
   const since =
     sinceEpoch ??
-    (() => {
-      const row = d
+    (await (async () => {
+      const row = await d
         .prepare(
           "SELECT MAX(start_date) AS latest FROM activities WHERE user_id = ? AND provider = 'strava'",
         )
@@ -278,7 +278,7 @@ export async function syncActivities(
       if (row.latest) return Math.floor(new Date(row.latest).getTime() / 1000);
       const days = Number(process.env.STRAVA_HISTORY_DAYS ?? 180);
       return Math.floor(Date.now() / 1000) - days * 86400;
-    })();
+    })());
 
   let imported = 0;
   let scanned = 0;
@@ -292,7 +292,7 @@ export async function syncActivities(
     }
     if (batch.length < 100) break;
   }
-  d.prepare(
+  await d.prepare(
     `INSERT INTO sync_state (user_id, provider, last_sync, last_error) VALUES (?, 'strava', datetime('now'), NULL)
      ON CONFLICT(user_id, provider) DO UPDATE SET last_sync = excluded.last_sync, last_error = NULL`,
   ).run(userId);

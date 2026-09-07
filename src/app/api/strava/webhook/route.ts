@@ -40,7 +40,7 @@ export async function POST(req: Request) {
   }
 
   const d = getDb();
-  const info = d
+  const info = await d
     .prepare("INSERT INTO webhook_events (provider, payload) VALUES ('strava', ?)")
     .run(JSON.stringify(event));
   const eventId = Number(info.lastInsertRowid);
@@ -48,9 +48,9 @@ export async function POST(req: Request) {
   after(async () => {
     try {
       await processEvent(event);
-      d.prepare("UPDATE webhook_events SET processed = 1 WHERE id = ?").run(eventId);
+      await d.prepare("UPDATE webhook_events SET processed = 1 WHERE id = ?").run(eventId);
     } catch (err) {
-      d.prepare("UPDATE webhook_events SET error = ? WHERE id = ?").run(
+      await d.prepare("UPDATE webhook_events SET error = ? WHERE id = ?").run(
         err instanceof Error ? err.message : "unknown",
         eventId,
       );
@@ -64,7 +64,7 @@ export async function POST(req: Request) {
 async function processEvent(event: StravaEvent) {
   if (event.object_type !== "activity") return;
   const d = getDb();
-  const row = d
+  const row = await d
     .prepare(
       "SELECT user_id FROM oauth_tokens WHERE provider = 'strava' AND external_user_id = ?",
     )
@@ -72,7 +72,7 @@ async function processEvent(event: StravaEvent) {
   if (!row) return; // an athlete we don't have connected
 
   if (event.aspect_type === "delete") {
-    d.prepare(
+    await d.prepare(
       "DELETE FROM activities WHERE user_id = ? AND provider = 'strava' AND external_id = ?",
     ).run(row.user_id, String(event.object_id));
     return;
@@ -81,8 +81,8 @@ async function processEvent(event: StravaEvent) {
   const activity = await getActivity(row.user_id, event.object_id);
   if (!isRun(activity)) return;
   const imported = await importActivity(row.user_id, activity);
-  recalibrateZones(row.user_id);
+  await recalibrateZones(row.user_id);
   if (imported !== null || event.aspect_type === "update") {
-    runAdaptation(row.user_id, "activity");
+    await runAdaptation(row.user_id, "activity");
   }
 }

@@ -132,23 +132,23 @@ export interface PlanDayView {
 
 const DAY_SHORT = ["MON", "TUE", "WED", "THU", "FRI", "SAT", "SUN"];
 
-export function buildState(userId: number, user: { name: string; email: string }): AppState {
+export async function buildState(userId: number, user: { name: string; email: string }): Promise<AppState> {
   const d = getDb();
   const t = todayIso();
-  const profile = getProfile(userId);
-  const zones = zonesFor(userId, profile);
-  const four = fourWeekAverage(userId, t);
+  const profile = await getProfile(userId);
+  const zones = await zonesFor(userId, profile);
+  const four = await fourWeekAverage(userId, t);
 
-  const tokens = d
+  const tokens = await d
     .prepare("SELECT provider FROM oauth_tokens WHERE user_id = ?")
     .all(userId) as Array<{ provider: string }>;
   const connected = new Set(tokens.map((x) => x.provider));
-  const syncRows = d
+  const syncRows = await d
     .prepare("SELECT provider, last_sync FROM sync_state WHERE user_id = ?")
     .all(userId) as Array<{ provider: string; last_sync: string | null }>;
   const lastSync = Object.fromEntries(syncRows.map((r) => [r.provider, r.last_sync]));
 
-  const planDays = d
+  const planDays = await d
     .prepare("SELECT * FROM plan_days WHERE user_id = ? ORDER BY date")
     .all(userId) as PlanDayRow[];
 
@@ -188,28 +188,28 @@ export function buildState(userId: number, user: { name: string; email: string }
     baselineKm: four.km || 10,
     baselineRunsPerWeek: Math.max(1, Math.round(four.runs)),
     goalSeconds: profile.goal_seconds,
-    longestRecentKm: (() => {
-      const l = longestRun(userId, t);
+    longestRecentKm: await (async () => {
+      const l = await longestRun(userId, t);
       return l ? km(l) : 0;
     })(),
   };
 
-  const banner = d
+  const banner = await d
     .prepare(
       "SELECT id, summary FROM adaptations WHERE user_id = ? AND dismissed = 0 ORDER BY id DESC LIMIT 1",
     )
     .get(userId) as { id: number; summary: string } | undefined;
 
   /* ---- progress ---- */
-  const vols = weeklyVolumes(userId, 9, t);
-  const easyHr = avgEasyHr(userId, t);
-  const cadence = avgCadence(userId, t);
-  const tp = thresholdPace(userId, t, profile.goal_seconds);
-  const adherence = weekAdherence(userId, addDays(mondayOf(t), -7));
-  const rec = assessRecovery(userId, t);
+  const vols = await weeklyVolumes(userId, 9, t);
+  const easyHr = await avgEasyHr(userId, t);
+  const cadence = await avgCadence(userId, t);
+  const tp = await thresholdPace(userId, t, profile.goal_seconds);
+  const adherence = await weekAdherence(userId, addDays(mondayOf(t), -7));
+  const rec = await assessRecovery(userId, t);
   const peak = peakVolume(profile.goal_seconds, four.km || 10);
-  const readiness = assessReadiness(userId, t, profile);
-  const longest = longestRun(userId, t);
+  const readiness = await assessReadiness(userId, t, profile);
+  const longest = await longestRun(userId, t);
 
   const stats = [
     {
@@ -260,15 +260,15 @@ export function buildState(userId: number, user: { name: string; email: string }
     },
     {
       label: "7-day training load",
-      value: `${trainingLoad(userId, t)}`,
+      value: `${await trainingLoad(userId, t)}`,
       trend: cadence ? `Cadence ${cadence} spm` : "Cadence not recorded",
       trendColor: "#8A968D",
     },
   ];
 
-  const runs = recentActivities(userId, 12);
+  const runs = await recentActivities(userId, 12);
   const surveyed = new Set(
-    (d.prepare("SELECT activity_id FROM surveys WHERE user_id = ?").all(userId) as Array<{
+    (await d.prepare("SELECT activity_id FROM surveys WHERE user_id = ?").all(userId) as Array<{
       activity_id: number;
     }>).map((r) => r.activity_id),
   );
@@ -284,8 +284,8 @@ export function buildState(userId: number, user: { name: string; email: string }
   }));
 
   /* ---- recovery ---- */
-  const nights = recoveryRows(userId, 7, t);
-  const tomorrow = d
+  const nights = await recoveryRows(userId, 7, t);
+  const tomorrow = await d
     .prepare("SELECT * FROM plan_days WHERE user_id = ? AND date = ?")
     .get(userId, addDays(t, 1)) as PlanDayRow | undefined;
 
@@ -317,7 +317,7 @@ export function buildState(userId: number, user: { name: string; email: string }
       },
       {
         label: "HRV overnight",
-        value: rec.hrvDelta !== null || rec.score !== null ? hrvValue(userId, t) : "—",
+        value: rec.hrvDelta !== null || rec.score !== null ? await hrvValue(userId, t) : "—",
         note:
           rec.hrvDelta === null
             ? "Baseline still building"
@@ -421,14 +421,14 @@ export function buildState(userId: number, user: { name: string; email: string }
       hr: a.average_hr ? `${Math.round(a.average_hr)} bpm` : "no HR",
       logged: surveyed.has(a.id),
     })),
-    chat: getDb()
+    chat: await getDb()
       .prepare("SELECT id, role, text FROM chat_messages WHERE user_id = ? ORDER BY id")
       .all(userId) as Array<{ id: number; role: "user" | "coach"; text: string }>,
   };
 }
 
-function hrvValue(userId: number, t: string): string {
-  const row = getDb()
+async function hrvValue(userId: number, t: string): Promise<string> {
+  const row = await getDb()
     .prepare(
       "SELECT hrv_ms FROM recovery WHERE user_id = ? AND hrv_ms IS NOT NULL AND date <= ? ORDER BY date DESC LIMIT 1",
     )

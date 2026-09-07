@@ -7,7 +7,7 @@ export const dynamic = "force-dynamic";
 export async function GET() {
   try {
     const user = await requireUser();
-    return json(buildState(user.id, { name: user.name, email: user.email }));
+    return json(await buildState(user.id, { name: user.name, email: user.email }));
   } catch (err) {
     return handleError(err);
   }

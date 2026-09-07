@@ -10,11 +10,11 @@ export default async function Home() {
   const userId = await currentUserId();
   if (userId === null) return <SignIn />;
 
-  const user = getDb()
+  const user = await getDb()
     .prepare("SELECT id, email, name FROM users WHERE id = ?")
     .get(userId) as { id: number; email: string; name: string } | undefined;
   if (!user) return <SignIn />;
 
-  const state = buildState(user.id, { name: user.name, email: user.email });
+  const state = await buildState(user.id, { name: user.name, email: user.email });
   return <App initialState={state} />;
 }

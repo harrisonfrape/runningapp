@@ -27,20 +27,20 @@ export function anthropicConfigured(): boolean {
  * athlete's live state, refreshed on every message so the coach always answers
  * against today's plan, today's runs and last night's recovery.
  */
-export function coachSystem(userId: number): string {
+export async function coachSystem(userId: number): Promise<string> {
   const d = getDb();
   const t = todayIso();
-  const profile = getProfile(userId);
-  const zones = zonesFor(userId, profile);
+  const profile = await getProfile(userId);
+  const zones = await zonesFor(userId, profile);
   const weeksToRace = Math.max(0, weeksBetween(t, profile.race_date));
-  const four = fourWeekAverage(userId, t);
-  const longest = longestRun(userId, t);
-  const readiness = assessReadiness(userId, t, profile);
-  const rec = assessRecovery(userId, t);
-  const tp = thresholdPace(userId, t, profile.goal_seconds);
+  const four = await fourWeekAverage(userId, t);
+  const longest = await longestRun(userId, t);
+  const readiness = await assessReadiness(userId, t, profile);
+  const rec = await assessRecovery(userId, t);
+  const tp = await thresholdPace(userId, t, profile.goal_seconds);
 
   const weekStart = mondayOf(t);
-  const week = d
+  const week = await d
     .prepare("SELECT * FROM plan_days WHERE user_id = ? AND date >= ? AND date < ? ORDER BY date")
     .all(userId, weekStart, addDays(weekStart, 7)) as PlanDayRow[];
   const weekLine = week
@@ -55,9 +55,10 @@ export function coachSystem(userId: number): string {
     })
     .join("; ");
 
-  const runs = recentActivities(userId, 8)
-    .map((a) => {
-      const survey = d
+  const runs = (
+    await Promise.all(
+      (await recentActivities(userId, 8)).map(async (a) => {
+      const survey = await d
         .prepare("SELECT feel, rpe, notes FROM surveys WHERE activity_id = ?")
         .get(a.id) as { feel: string; rpe: number; notes: string } | undefined;
       const hr = a.average_hr ? `${Math.round(a.average_hr)} bpm avg` : "no HR";
@@ -65,8 +66,9 @@ export function coachSystem(userId: number): string {
         ? `; athlete said: ${survey.feel}, RPE ${survey.rpe}${survey.notes ? ` — "${survey.notes}"` : ""}`
         : "";
       return `${relativeDate(a.start_date, t)}: ${a.name}, ${km(a).toFixed(1)} km at ${formatPace(a)}, ${hr}${fb}`;
-    })
-    .join(" | ");
+      }),
+    )
+  ).join(" | ");
 
   const zoneLine = zones
     .map((z) =>
@@ -74,7 +76,7 @@ export function coachSystem(userId: number): string {
     )
     .join(", ");
 
-  const adherence = weekAdherence(userId, addDays(weekStart, -7));
+  const adherence = await weekAdherence(userId, addDays(weekStart, -7));
 
   const recLine = rec.hasData
     ? `Recovery score ${rec.score}/100 (${rec.status}). Sleep ${rec.sleepHours?.toFixed(1) ?? "?"} h, sleep score ${rec.sleepScore ?? "?"}, overnight HRV ${rec.hrvDelta === null ? "no baseline yet" : `${rec.hrvDelta >= 0 ? "+" : ""}${rec.hrvDelta} ms vs baseline`}, body battery ${rec.bodyBattery ?? "?"}.`
@@ -100,8 +102,8 @@ export interface StoredMessage {
   text: string;
 }
 
-export function chatHistory(userId: number, limit = 20): StoredMessage[] {
-  const rows = getDb()
+export async function chatHistory(userId: number, limit = 20): Promise<StoredMessage[]> {
+  const rows = await getDb()
     .prepare(
       "SELECT role, text FROM chat_messages WHERE user_id = ? ORDER BY id DESC LIMIT ?",
     )
@@ -109,8 +111,8 @@ export function chatHistory(userId: number, limit = 20): StoredMessage[] {
   return rows.reverse();
 }
 
-export function appendMessage(userId: number, role: "user" | "coach", text: string) {
-  getDb()
+export async function appendMessage(userId: number, role: "user" | "coach", text: string) {
+  await getDb()
     .prepare("INSERT INTO chat_messages (user_id, role, text) VALUES (?, ?, ?)")
     .run(userId, role, text);
 }
@@ -120,7 +122,7 @@ export async function askCoach(userId: number, question: string): Promise<string
     throw new Error("The coaching engine is not configured (set ANTHROPIC_API_KEY)");
   }
   const client = new Anthropic();
-  const history = chatHistory(userId, 12);
+  const history = await chatHistory(userId, 12);
 
   const messages: Anthropic.MessageParam[] = history.map((m) => ({
     role: m.role === "coach" ? ("assistant" as const) : ("user" as const),
@@ -131,7 +133,7 @@ export async function askCoach(userId: number, question: string): Promise<string
   const response = await client.messages.create({
     model: MODEL,
     max_tokens: 4000,
-    system: coachSystem(userId),
+    system: await coachSystem(userId),
     thinking: { type: "adaptive" },
     output_config: { effort: "medium" },
     messages,
@@ -149,12 +151,12 @@ export async function askCoach(userId: number, question: string): Promise<string
 }
 
 /** The coach's opening message, written once the plan exists. */
-export function welcomeMessage(userId: number): string {
+export async function welcomeMessage(userId: number): Promise<string> {
   const t = todayIso();
-  const profile = getProfile(userId);
-  const four = fourWeekAverage(userId, t);
-  const readiness = assessReadiness(userId, t, profile);
-  const first = getDb()
+  const profile = await getProfile(userId);
+  const four = await fourWeekAverage(userId, t);
+  const readiness = await assessReadiness(userId, t, profile);
+  const first = await getDb()
     .prepare(
       "SELECT * FROM plan_days WHERE user_id = ? AND date >= ? AND type != 'rest' ORDER BY date LIMIT 1",
     )

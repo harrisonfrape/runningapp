@@ -23,12 +23,12 @@ export async function GET(req: Request) {
   if (!code || !state) return back({ connect: "garmin", status: "invalid" });
 
   const d = getDb();
-  const row = d
+  const row = await d
     .prepare(
       "SELECT user_id, code_verifier FROM oauth_states WHERE state = ? AND provider = 'garmin'",
     )
     .get(state) as { user_id: number; code_verifier: string } | undefined;
-  d.prepare("DELETE FROM oauth_states WHERE state = ?").run(state);
+  await d.prepare("DELETE FROM oauth_states WHERE state = ?").run(state);
   if (!row) return back({ connect: "garmin", status: "expired" });
 
   const cfg = garminConfig();
@@ -36,18 +36,18 @@ export async function GET(req: Request) {
 
   try {
     const tokens = await exchangeCode(cfg, code, row.code_verifier);
-    saveTokens(row.user_id, tokens);
+    await saveTokens(row.user_id, tokens);
     const { userId: garminId } = await garminUserId(row.user_id);
-    saveTokens(row.user_id, tokens, garminId);
+    await saveTokens(row.user_id, tokens, garminId);
     // Historic summaries arrive asynchronously on the push webhook; the pull
     // below fills in whatever Garmin already holds (the last seven days).
-    await requestBackfill(row.user_id, "dailies", 90).catch(() => []);
-    await requestBackfill(row.user_id, "sleeps", 90).catch(() => []);
-    await pullRecovery(row.user_id, 7).catch(() => null);
+    requestBackfill(row.user_id, "dailies", 90).catch(() => []);
+    requestBackfill(row.user_id, "sleeps", 90).catch(() => []);
+    pullRecovery(row.user_id, 7).catch(() => null);
     return back({ connect: "garmin", status: "ok" });
   } catch (err) {
     console.error("[stride] garmin callback", err);
-    d.prepare(
+    await d.prepare(
       `INSERT INTO sync_state (user_id, provider, last_error) VALUES (?, 'garmin', ?)
        ON CONFLICT(user_id, provider) DO UPDATE SET last_error = excluded.last_error`,
     ).run(row.user_id, err instanceof Error ? err.message : "unknown");

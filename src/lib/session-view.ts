@@ -125,8 +125,8 @@ export function coachNoteFor(type: SessionType): string {
   }[type];
 }
 
-export function segmentsFor(ctx: SessionContext, day: ViewDay): Segment[] {
-  const targets = sessionTargets(ctx, day);
+export async function segmentsFor(ctx: SessionContext, day: ViewDay): Promise<Segment[]> {
+  const targets = await sessionTargets(ctx, day);
   const tp = ctx.thresholdPaceSecPerKm;
   const z = ctx.zones;
 
@@ -194,8 +194,8 @@ export function segmentsFor(ctx: SessionContext, day: ViewDay): Segment[] {
 }
 
 /** The full day-detail payload the "Today's workout" screen renders. */
-export function workoutFor(ctx: SessionContext, day: ViewDay) {
-  const t = sessionTargets(ctx, day);
+export async function workoutFor(ctx: SessionContext, day: ViewDay) {
+  const t = await sessionTargets(ctx, day);
   return {
     title: day.title,
     adapted: day.adapted,
@@ -206,6 +206,6 @@ export function workoutFor(ctx: SessionContext, day: ViewDay) {
     hr: t.hr,
     pace: t.pace,
     coachNote: coachNoteFor(day.type),
-    segments: segmentsFor(ctx, day),
+    segments: await segmentsFor(ctx, day),
   };
 }

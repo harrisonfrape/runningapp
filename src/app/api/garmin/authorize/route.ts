@@ -17,7 +17,7 @@ export async function GET() {
     }
     const state = crypto.randomBytes(16).toString("hex");
     const { verifier, challenge } = pkcePair();
-    getDb()
+    await getDb()
       .prepare(
         "INSERT INTO oauth_states (state, provider, user_id, code_verifier, created_at) VALUES (?, 'garmin', ?, ?, ?)",
       )

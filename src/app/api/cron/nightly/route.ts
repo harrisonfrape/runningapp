@@ -28,11 +28,11 @@ export async function POST(req: Request) {
     if (presented !== secret) return json({ error: "Unauthorized" }, { status: 401 });
 
     const d = getDb();
-    const users = d.prepare("SELECT id, email FROM users").all() as Array<{
+    const users = await d.prepare("SELECT id, email FROM users").all() as Array<{
       id: number;
       email: string;
     }>;
-    const providersFor = d.prepare(
+    const providersFor = await d.prepare(
       "SELECT provider FROM oauth_tokens WHERE user_id = ?",
     );
 
@@ -40,7 +40,7 @@ export async function POST(req: Request) {
 
     for (const user of users) {
       const connected = new Set(
-        (providersFor.all(user.id) as Array<{ provider: string }>).map((r) => r.provider),
+        (((await providersFor.all(user.id)) as Array<{ provider: string }>)).map((r) => r.provider),
       );
       const row: Record<string, unknown> = { user: user.email };
 
@@ -64,8 +64,8 @@ export async function POST(req: Request) {
       }
 
       try {
-        row.zonesRecalibrated = recalibrateZones(user.id);
-        const adaptation = runAdaptation(user.id, "recovery");
+        row.zonesRecalibrated = await recalibrateZones(user.id);
+        const adaptation = await runAdaptation(user.id, "recovery");
         row.changes = adaptation.changes.length;
         if (adaptation.summary) row.summary = adaptation.summary;
       } catch (err) {
@@ -81,8 +81,8 @@ export async function POST(req: Request) {
   }
 }
 
-function noteError(userId: number, provider: string, message: string) {
-  getDb()
+async function noteError(userId: number, provider: string, message: string) {
+  await getDb()
     .prepare(
       `INSERT INTO sync_state (user_id, provider, last_error) VALUES (?, ?, ?)
        ON CONFLICT(user_id, provider) DO UPDATE SET last_error = excluded.last_error`,

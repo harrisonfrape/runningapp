@@ -8,7 +8,7 @@ export async function POST() {
   try {
     const user = await requireUser();
     const result = await pullRecovery(user.id, 7);
-    const adaptation = runAdaptation(user.id, "recovery");
+    const adaptation = await runAdaptation(user.id, "recovery");
     return json({ ok: true, ...result, changes: adaptation.changes });
   } catch (err) {
     return handleError(err);

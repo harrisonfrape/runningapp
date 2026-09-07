@@ -10,7 +10,7 @@ original handoff brief is kept at [`design/HANDOFF.md`](design/HANDOFF.md).
 ## Stack
 
 - **Next.js 15** (App Router) + React 19, TypeScript
-- **SQLite** via `better-sqlite3` — per-user plans, activities, recovery, surveys, chat, tokens
+- **Turso / libSQL** — SQLite over HTTP, so the data survives a serverless filesystem; holds per-user plans, activities, recovery, surveys, chat and OAuth tokens
 - **Strava API** — OAuth 2.0, webhook event subscription, activity + stream ingest
 - **Garmin Health API** — OAuth 2.0 with PKCE, push notifications, backfill, pull fallback
 - **Anthropic API** (`claude-opus-5`) — the coach chat, with live athlete state in the prompt
@@ -24,6 +24,14 @@ npm install
 cp .env.example .env.local     # fill in the values below
 npm run dev                    # http://localhost:3000
 ```
+
+For local work you can skip Turso entirely and point the database at a file:
+
+```
+TURSO_DATABASE_URL=file:./data/stride.db
+```
+
+The schema is created on the first query, so there is no migration step to run.
 
 Sign in with an email address, then work through onboarding: confirm the goal, connect Garmin
 and Strava, review the heart-rate zones, and the plan is generated from your Strava history.
@@ -161,15 +169,43 @@ cannot be triggered by anyone who finds the URL.
 
 See [`.env.example`](.env.example). `APP_URL` must be the exact public origin the OAuth redirect
 URIs are registered against, and must be reachable for webhooks to arrive. `APP_SECRET` (32+ random
-characters) is required in production.
+characters) is required in production, and `CRON_SECRET` guards the nightly route.
 
-## Notes on fidelity
+## Deploying to Netlify
 
-The screens, copy, colours and interactions follow the prototype. Two things deliberately differ,
-because the prototype's numbers were demo data:
+Netlify runs the App Router on Functions, which means a read-only filesystem and an ephemeral
+`/tmp` — a local database file would be lost between invocations. That is why the store is Turso
+rather than a file on disk.
 
-- **Volume numbers come from the athlete.** The prototype's block table starts prep at ~21 km/week
-  for a runner averaging 10 km. Stride starts from the real four-week average and ramps within a
-  safe weekly increase, so an athlete's first week is not double their current load.
-- **The OAuth dialogs are real.** The branded consent sheet with its scope list is kept, but
-  authorising leaves for Strava or Garmin Connect instead of simulating a 1.3-second pause.
+1. **Create the database** and keep the two values it prints:
+
+   ```bash
+   turso db create stride
+   turso db show stride --url        # -> TURSO_DATABASE_URL
+   turso db tokens create stride     # -> TURSO_AUTH_TOKEN
+   ```
+
+2. **Connect the repo** to a Netlify site. [`netlify.toml`](netlify.toml) already sets the build
+   command and loads `@netlify/plugin-nextjs`; nothing else needs configuring.
+
+3. **Set the environment variables** in Netlify (Site configuration → Environment variables) —
+   every key from `.env.example` that you actually use. `APP_URL` must be the site's real origin,
+   e.g. `https://stride.netlify.app`, and `APP_SECRET` and `CRON_SECRET` must both be set.
+
+4. **Repoint Strava** once the site is live:
+   - set the app's **Authorization Callback Domain** to the site's host (`netlify.app`, or your
+     custom domain) at <https://www.strava.com/settings/api>
+   - re-register the webhook, because the old subscription still points at the previous origin:
+
+     ```bash
+     npm run strava:unsubscribe
+     npm run strava:subscribe
+     ```
+
+5. **The nightly job** runs itself: [`netlify/functions/nightly.mts`](netlify/functions/nightly.mts)
+   is a scheduled function that calls `/api/cron/nightly` with the `CRON_SECRET` bearer token, so
+   the cron shell, a manual `curl` and Netlify all exercise the same code path.
+
+One thing to watch on any serverless host: both webhook routes acknowledge inside the provider's
+timeout and finish the work in `after()`. If a deployment ever truncates that background work, move
+the processing above the response — correctness first, the two-second budget second.

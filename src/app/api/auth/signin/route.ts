@@ -9,7 +9,7 @@ export async function POST(req: Request) {
       return json({ error: "Enter a valid email address" }, { status: 400 });
     }
     const name = (body.name ?? "").trim() || email.split("@")[0];
-    const user = upsertUser(email, name);
+    const user = await upsertUser(email, name);
     await setSession(user.id);
     return json({ ok: true, user });
   } catch (err) {

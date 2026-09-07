@@ -68,12 +68,12 @@ async function tokenRequest(body: URLSearchParams): Promise<TokenResponse> {
   return (await res.json()) as TokenResponse;
 }
 
-export function exchangeCode(
+export async function exchangeCode(
   cfg: GarminConfig,
   code: string,
   verifier: string,
 ): Promise<TokenResponse> {
-  return tokenRequest(
+  return await tokenRequest(
     new URLSearchParams({
       grant_type: "authorization_code",
       client_id: cfg.clientId,
@@ -85,8 +85,8 @@ export function exchangeCode(
   );
 }
 
-function refresh(cfg: GarminConfig, refreshToken: string): Promise<TokenResponse> {
-  return tokenRequest(
+async function refresh(cfg: GarminConfig, refreshToken: string): Promise<TokenResponse> {
+  return await tokenRequest(
     new URLSearchParams({
       grant_type: "refresh_token",
       client_id: cfg.clientId,
@@ -96,9 +96,9 @@ function refresh(cfg: GarminConfig, refreshToken: string): Promise<TokenResponse
   );
 }
 
-export function saveTokens(userId: number, t: TokenResponse, garminUserId?: string) {
+export async function saveTokens(userId: number, t: TokenResponse, garminUserId?: string) {
   const expiresAt = Math.floor(Date.now() / 1000) + t.expires_in;
-  getDb()
+  await getDb()
     .prepare(
       `INSERT INTO oauth_tokens (user_id, provider, access_token, refresh_token, expires_at, scope, external_user_id)
        VALUES (?, 'garmin', ?, ?, ?, ?, ?)
@@ -115,7 +115,7 @@ export function saveTokens(userId: number, t: TokenResponse, garminUserId?: stri
 export async function accessToken(userId: number): Promise<string> {
   const cfg = garminConfig();
   if (!cfg) throw new Error("Garmin is not configured (GARMIN_CLIENT_ID / GARMIN_CLIENT_SECRET)");
-  const row = getDb()
+  const row = await getDb()
     .prepare(
       "SELECT access_token, refresh_token, expires_at FROM oauth_tokens WHERE user_id = ? AND provider = 'garmin'",
     )
@@ -126,7 +126,7 @@ export async function accessToken(userId: number): Promise<string> {
   const now = Math.floor(Date.now() / 1000);
   if (row.expires_at > now + 120) return row.access_token;
   const t = await refresh(cfg, row.refresh_token);
-  saveTokens(userId, t);
+  await saveTokens(userId, t);
   return t.access_token;
 }
 
@@ -150,7 +150,7 @@ export async function deregister(userId: number): Promise<void> {
     method: "DELETE",
     headers: { Authorization: `Bearer ${token}`, Accept: "application/json" },
   });
-  getDb()
+  await getDb()
     .prepare("DELETE FROM oauth_tokens WHERE user_id = ? AND provider = 'garmin'")
     .run(userId);
 }
@@ -198,7 +198,7 @@ function dateOf(s: { calendarDate?: string; startTimeInSeconds?: number }): stri
 }
 
 /** Merge one field-set into the recovery row for a date, leaving other fields intact. */
-function upsertRecovery(
+async function upsertRecovery(
   userId: number,
   date: string,
   fields: Partial<{
@@ -211,26 +211,26 @@ function upsertRecovery(
   }>,
 ) {
   const d = getDb();
-  d.prepare("INSERT OR IGNORE INTO recovery (user_id, date) VALUES (?, ?)").run(userId, date);
+  await d.prepare("INSERT OR IGNORE INTO recovery (user_id, date) VALUES (?, ?)").run(userId, date);
   const keys = Object.keys(fields).filter(
     (k) => fields[k as keyof typeof fields] !== undefined && fields[k as keyof typeof fields] !== null,
   );
   if (!keys.length) return;
   const setSql = keys.map((k) => `${k} = ?`).join(", ");
-  const values = keys.map((k) => fields[k as keyof typeof fields]);
-  d.prepare(`UPDATE recovery SET ${setSql} WHERE user_id = ? AND date = ?`).run(
+  const values = keys.map((k) => fields[k as keyof typeof fields] ?? null);
+  await d.prepare(`UPDATE recovery SET ${setSql} WHERE user_id = ? AND date = ?`).run(
     ...values,
     userId,
     date,
   );
 }
 
-export function ingestDailies(userId: number, rows: DailySummary[]): number {
+export async function ingestDailies(userId: number, rows: DailySummary[]): Promise<number> {
   let n = 0;
   for (const r of rows) {
     const date = dateOf(r);
     if (!date) continue;
-    upsertRecovery(userId, date, {
+    await upsertRecovery(userId, date, {
       resting_hr: r.restingHeartRateInBeats ?? r.restingHeartRateInBeatsPerMinute,
       body_battery:
         r.bodyBatteryHighestValue ?? r.bodyBatteryChargedValue ?? r.bodyBatteryMostRecentValue,
@@ -240,12 +240,12 @@ export function ingestDailies(userId: number, rows: DailySummary[]): number {
   return n;
 }
 
-export function ingestSleeps(userId: number, rows: SleepSummary[]): number {
+export async function ingestSleeps(userId: number, rows: SleepSummary[]): Promise<number> {
   let n = 0;
   for (const r of rows) {
     const date = dateOf(r);
     if (!date) continue;
-    upsertRecovery(userId, date, {
+    await upsertRecovery(userId, date, {
       sleep_seconds: r.durationInSeconds,
       sleep_score: r.overallSleepScore?.value ?? r.sleepScores?.overall?.value,
       hrv_ms: r.avgOvernightHrv,
@@ -255,26 +255,26 @@ export function ingestSleeps(userId: number, rows: SleepSummary[]): number {
   return n;
 }
 
-export function ingestHrv(userId: number, rows: HrvSummary[]): number {
+export async function ingestHrv(userId: number, rows: HrvSummary[]): Promise<number> {
   let n = 0;
   for (const r of rows) {
     const date = dateOf(r);
     if (!date || r.lastNightAvg == null) continue;
-    upsertRecovery(userId, date, { hrv_ms: r.lastNightAvg });
+    await upsertRecovery(userId, date, { hrv_ms: r.lastNightAvg });
     n++;
   }
   return n;
 }
 
-export function ingestUserMetrics(userId: number, rows: UserMetricsSummary[]): number {
+export async function ingestUserMetrics(userId: number, rows: UserMetricsSummary[]): Promise<number> {
   let n = 0;
   const d = getDb();
   for (const r of rows) {
     const date = dateOf(r);
     const vo2 = r.vo2MaxRunning ?? r.enhancedVo2Max ?? r.vo2Max;
     if (!date || vo2 == null) continue;
-    upsertRecovery(userId, date, { vo2max: vo2 });
-    d.prepare("UPDATE profiles SET vo2max = ? WHERE user_id = ?").run(vo2, userId);
+    await upsertRecovery(userId, date, { vo2max: vo2 });
+    await d.prepare("UPDATE profiles SET vo2max = ? WHERE user_id = ?").run(vo2, userId);
     n++;
   }
   return n;
@@ -310,18 +310,18 @@ export async function pullRecovery(
 ): Promise<{ dailies: number; sleeps: number; metrics: number }> {
   const end = Math.floor(Date.now() / 1000);
   const start = end - days * 86400;
-  const dailies = ingestDailies(userId, await pullWindow<DailySummary>(userId, "dailies", start, end));
-  const sleeps = ingestSleeps(userId, await pullWindow<SleepSummary>(userId, "sleeps", start, end));
+  const dailies = await ingestDailies(userId, await pullWindow<DailySummary>(userId, "dailies", start, end));
+  const sleeps = await ingestSleeps(userId, await pullWindow<SleepSummary>(userId, "sleeps", start, end));
   let metrics = 0;
   try {
-    metrics = ingestUserMetrics(
+    metrics = await ingestUserMetrics(
       userId,
       await pullWindow<UserMetricsSummary>(userId, "userMetrics", start, end),
     );
   } catch {
     // userMetrics requires the Health API "user metrics" permission; skip if absent.
   }
-  getDb()
+  await getDb()
     .prepare(
       `INSERT INTO sync_state (user_id, provider, last_sync, last_error) VALUES (?, 'garmin', datetime('now'), NULL)
        ON CONFLICT(user_id, provider) DO UPDATE SET last_sync = excluded.last_sync, last_error = NULL`,
@@ -351,8 +351,8 @@ export async function requestBackfill(userId: number, resource: string, days: nu
 }
 
 /** Maps a Garmin user id back to the local athlete (push notifications key on it). */
-export function userIdForGarminUser(garminUserId: string): number | null {
-  const row = getDb()
+export async function userIdForGarminUser(garminUserId: string): Promise<number | null> {
+  const row = await getDb()
     .prepare(
       "SELECT user_id FROM oauth_tokens WHERE provider = 'garmin' AND external_user_id = ?",
     )

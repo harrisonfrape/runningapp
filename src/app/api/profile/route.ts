@@ -28,25 +28,25 @@ export async function POST(req: Request) {
       if (!/^\d{4}-\d{2}-\d{2}$/.test(body.raceDate)) {
         return json({ error: "Race date must be YYYY-MM-DD" }, { status: 400 });
       }
-      d.prepare("UPDATE profiles SET race_date = ? WHERE user_id = ?").run(body.raceDate, user.id);
+      await d.prepare("UPDATE profiles SET race_date = ? WHERE user_id = ?").run(body.raceDate, user.id);
     }
     if (body.raceName) {
-      d.prepare("UPDATE profiles SET race_name = ? WHERE user_id = ?").run(body.raceName, user.id);
+      await d.prepare("UPDATE profiles SET race_name = ? WHERE user_id = ?").run(body.raceName, user.id);
     }
     if (body.goalTime) {
       const seconds = parseGoal(body.goalTime);
       if (!seconds || seconds < 2 * 3600 || seconds > 8 * 3600) {
         return json({ error: "Goal time must look like 3:30:00" }, { status: 400 });
       }
-      d.prepare("UPDATE profiles SET goal_seconds = ? WHERE user_id = ?").run(seconds, user.id);
+      await d.prepare("UPDATE profiles SET goal_seconds = ? WHERE user_id = ?").run(seconds, user.id);
     }
-    if (body.lthr) d.prepare("UPDATE profiles SET lthr = ? WHERE user_id = ?").run(body.lthr, user.id);
-    if (body.maxHr) d.prepare("UPDATE profiles SET max_hr = ? WHERE user_id = ?").run(body.maxHr, user.id);
+    if (body.lthr) await d.prepare("UPDATE profiles SET lthr = ? WHERE user_id = ?").run(body.lthr, user.id);
+    if (body.maxHr) await d.prepare("UPDATE profiles SET max_hr = ? WHERE user_id = ?").run(body.maxHr, user.id);
 
-    const onboarded = d
+    const onboarded = await d
       .prepare("SELECT onboarded FROM profiles WHERE user_id = ?")
       .get(user.id) as { onboarded: number };
-    if (onboarded.onboarded === 1) buildPlan(user.id);
+    if (onboarded.onboarded === 1) await buildPlan(user.id);
 
     return json({ ok: true });
   } catch (err) {

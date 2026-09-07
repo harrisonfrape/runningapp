@@ -16,7 +16,7 @@ export async function GET() {
       );
     }
     const state = crypto.randomBytes(16).toString("hex");
-    getDb()
+    await getDb()
       .prepare(
         "INSERT INTO oauth_states (state, provider, user_id, created_at) VALUES (?, 'strava', ?, ?)",
       )

@@ -49,35 +49,35 @@ export interface ProfileRow {
   onboarded: number;
 }
 
-export function getProfile(userId: number): ProfileRow {
-  const row = getDb().prepare("SELECT * FROM profiles WHERE user_id = ?").get(userId) as
+export async function getProfile(userId: number): Promise<ProfileRow> {
+  const row = await getDb().prepare("SELECT * FROM profiles WHERE user_id = ?").get(userId) as
     | ProfileRow
     | undefined;
   if (!row) throw new Error("No athlete profile");
   return row;
 }
 
-export function zonesFor(userId: number, profile?: ProfileRow) {
-  const p = profile ?? getProfile(userId);
+export async function zonesFor(userId: number, profile?: ProfileRow) {
+  const p = profile ?? await getProfile(userId);
   const lthr = p.lthr ?? 168;
   const maxHr = p.max_hr ?? 192;
-  const tp = thresholdPace(userId, todayIso(), p.goal_seconds);
+  const tp = await thresholdPace(userId, todayIso(), p.goal_seconds);
   return buildZones(lthr, maxHr, tp);
 }
 
-function upcoming(userId: number, fromIso: string): PlanDayRow[] {
-  return getDb()
+async function upcoming(userId: number, fromIso: string): Promise<PlanDayRow[]> {
+  return await getDb()
     .prepare("SELECT * FROM plan_days WHERE user_id = ? AND date >= ? ORDER BY date ASC")
     .all(userId, fromIso) as PlanDayRow[];
 }
 
-function applyChange(
+async function applyChange(
   day: PlanDayRow,
   patch: Partial<Pick<PlanDayRow, "title" | "sub" | "km" | "zone" | "type" | "hr_cap">>,
   reason: string,
 ) {
   const d = getDb();
-  d.prepare(
+  await d.prepare(
     `UPDATE plan_days SET title = ?, sub = ?, km = ?, zone = ?, type = ?, hr_cap = ?,
        adapted = 1, adapt_reason = ? WHERE id = ?`,
   ).run(
@@ -93,12 +93,12 @@ function applyChange(
 }
 
 /** Link finished runs to the day they were planned for. */
-export function matchActivitiesToPlan(userId: number) {
+export async function matchActivitiesToPlan(userId: number) {
   const d = getDb();
-  const rows = activitiesSince(userId, addDays(todayIso(), -60));
+  const rows = await activitiesSince(userId, addDays(todayIso(), -60));
   for (const a of rows) {
     const date = a.start_date.slice(0, 10);
-    d.prepare(
+    await d.prepare(
       `UPDATE plan_days SET completed_activity_id = ?
        WHERE user_id = ? AND date = ? AND type != 'rest' AND completed_activity_id IS NULL`,
     ).run(a.id, userId, date);
@@ -124,18 +124,18 @@ export interface AdaptationResult {
  * Every change carries the reason that produced it, which is what the ADAPTED
  * badges and the coach's chat message are built from.
  */
-export function runAdaptation(
+export async function runAdaptation(
   userId: number,
   trigger: "activity" | "recovery" | "survey",
-): AdaptationResult {
+): Promise<AdaptationResult> {
   const d = getDb();
-  const profile = getProfile(userId);
+  const profile = await getProfile(userId);
   const t = todayIso();
-  matchActivitiesToPlan(userId);
+  await matchActivitiesToPlan(userId);
 
-  const zones = zonesFor(userId, profile);
+  const zones = await zonesFor(userId, profile);
   const z2 = zones[1];
-  const days = upcoming(userId, t);
+  const days = await upcoming(userId, t);
   const changes: AdaptationChange[] = [];
   const notes: Array<{ cause: "run" | "recovery" | "adherence"; text: string }> = [];
   // One session gets changed by at most one rule per pass — otherwise the
@@ -148,7 +148,7 @@ export function runAdaptation(
     );
 
   /* Rule 1 — poor overnight recovery softens tomorrow's session (strongest signal). */
-  const rec = assessRecovery(userId, t);
+  const rec = await assessRecovery(userId, t);
   if (rec.hasData && rec.poor) {
     const tomorrow = days.find((x) => x.date === addDays(t, 1) && x.type !== "rest");
     if (tomorrow && !isAlreadyAdapted(tomorrow, "softened")) {
@@ -160,7 +160,7 @@ export function runAdaptation(
           : `sleep came up short at ${rec.sleepHours?.toFixed(1)} h`;
       if (tomorrow.type === "hard" || tomorrow.type === "tempo") {
         const newKm = Math.round(tomorrow.km * 0.7 * 2) / 2;
-        applyChange(
+        await applyChange(
           tomorrow,
           {
             title: "Easy run — session softened",
@@ -175,7 +175,7 @@ export function runAdaptation(
         notes.push({ cause: "recovery", text: `swapped ${dayLabel(tomorrow.date)}'s quality session for an easy run` });
       } else {
         const newKm = Math.round(tomorrow.km * 0.75 * 2) / 2;
-        applyChange(
+        await applyChange(
           tomorrow,
           {
             title: `${tomorrow.title} — softened`,
@@ -197,13 +197,13 @@ export function runAdaptation(
   }
 
   /* Rule 2 — the last easy run came in hot (heart rate or perceived effort). */
-  const recent = activitiesSince(userId, addDays(t, -4)).filter((a) => km(a) >= 3);
+  const recent = (await activitiesSince(userId, addDays(t, -4))).filter((a) => km(a) >= 3);
   const last = recent[0];
   if (last) {
-    const survey = d
+    const survey = await d
       .prepare("SELECT feel, rpe, notes FROM surveys WHERE activity_id = ?")
       .get(last.id) as { feel: string; rpe: number; notes: string } | undefined;
-    const plannedDay = d
+    const plannedDay = await d
       .prepare("SELECT * FROM plan_days WHERE user_id = ? AND date = ?")
       .get(userId, last.start_date.slice(0, 10)) as PlanDayRow | undefined;
     const wasEasyDay = plannedDay ? ["easy", "long", "recovery"].includes(plannedDay.type) : true;
@@ -222,7 +222,7 @@ export function runAdaptation(
         if (reps > 2) {
           const newReps = reps - 1;
           const newKm = kmForReps(newReps);
-          applyChange(
+          await applyChange(
             hard,
             {
               title: `${hard.title} — trimmed`,
@@ -240,7 +240,7 @@ export function runAdaptation(
           notes.push({ cause: "run", text: `trimmed ${dayLabel(hard.date)}'s intervals to ${newReps} × 1 km` });
         } else {
           const newKm = Math.round(hard.km * 0.8 * 2) / 2;
-          applyChange(
+          await applyChange(
             hard,
             { title: `${hard.title} — shortened`, km: newKm, sub: `${hard.sub} Volume trimmed: ${evidence}.` },
             `shortened after ${evidence}`,
@@ -259,7 +259,7 @@ export function runAdaptation(
       if (easy && !easy.hr_cap) {
         touched.add(easy.date);
         const cap = easy.type === "recovery" ? zones[0].highHr : z2.highHr;
-        applyChange(
+        await applyChange(
           easy,
           { sub: `${easy.sub} Cap at ${cap} bpm — keep it genuinely easy.`, hr_cap: cap },
           `HR-capped at ${cap} after ${evidence}`,
@@ -276,13 +276,13 @@ export function runAdaptation(
   }
 
   /* Rule 3 — aerobic load absorbed well: pull the long-run progression forward. */
-  if (absorbedWell(userId, t, z2.highHr, rec.poor)) {
+  if (await absorbedWell(userId, t, z2.highHr, rec.poor)) {
     const long = nextOfType(["long"], true);
     if (long && !isAlreadyAdapted(long, "extended")) {
       touched.add(long.date);
       const newKm = Math.round(Math.min(long.km * 1.1, long.km + 2) * 2) / 2;
       if (newKm > long.km) {
-        applyChange(
+        await applyChange(
           long,
           {
             title: `${long.title} — extended`,
@@ -303,7 +303,7 @@ export function runAdaptation(
   }
 
   /* Rule 4 — last week's adherence was low: ease next week's volume back. */
-  const adherence = weekAdherence(userId, addDays(mondayOf(t), -7));
+  const adherence = await weekAdherence(userId, addDays(mondayOf(t), -7));
   if (adherence !== null && adherence < 0.6) {
     const nextWeekStart = addDays(mondayOf(t), 7);
     const nextWeek = days.filter(
@@ -313,7 +313,7 @@ export function runAdaptation(
     if (nextWeek.length && !alreadyEased) {
       for (const day of nextWeek) {
         const newKm = Math.round(day.km * 0.9 * 2) / 2;
-        applyChange(
+        await applyChange(
           day,
           { km: newKm },
           `eased — only ${Math.round(adherence * 100)}% of last week's planned volume was run`,
@@ -347,7 +347,7 @@ export function runAdaptation(
   // not about the upload.
   const announced =
     last !== undefined &&
-    (d
+    (await d
       .prepare(
         "SELECT 1 FROM adaptations WHERE user_id = ? AND announced_activity_id = ? LIMIT 1",
       )
@@ -355,7 +355,7 @@ export function runAdaptation(
 
   const coachMessage = buildCoachMessage(trigger, last, notes, rec, announced);
 
-  d.prepare(
+  await d.prepare(
     "INSERT INTO adaptations (user_id, summary, detail, announced_activity_id) VALUES (?, ?, ?, ?)",
   ).run(
     userId,
@@ -364,7 +364,7 @@ export function runAdaptation(
     notes.some((n) => n.cause === "run") && last ? last.id : null,
   );
   if (coachMessage) {
-    d.prepare("INSERT INTO chat_messages (user_id, role, text) VALUES (?, 'coach', ?)").run(
+    await d.prepare("INSERT INTO chat_messages (user_id, role, text) VALUES (?, 'coach', ?)").run(
       userId,
       coachMessage,
     );
@@ -431,15 +431,15 @@ function buildCoachMessage(
 }
 
 /** Share of last week's planned kilometres that were actually run. */
-export function weekAdherence(userId: number, weekStart: string): number | null {
+export async function weekAdherence(userId: number, weekStart: string): Promise<number | null> {
   const d = getDb();
-  const planned = d
+  const planned = await d
     .prepare(
       "SELECT COALESCE(SUM(km), 0) AS km FROM plan_days WHERE user_id = ? AND date >= ? AND date < ?",
     )
     .get(userId, weekStart, addDays(weekStart, 7)) as { km: number };
   if (!planned.km) return null;
-  const done = d
+  const done = await d
     .prepare(
       `SELECT COALESCE(SUM(distance_m), 0) / 1000.0 AS km FROM activities
        WHERE user_id = ? AND date(start_date) >= ? AND date(start_date) < ?`,
@@ -448,11 +448,11 @@ export function weekAdherence(userId: number, weekStart: string): number | null 
   return done.km / planned.km;
 }
 
-function absorbedWell(userId: number, t: string, z2High: number, recoveryPoor: boolean): boolean {
+async function absorbedWell(userId: number, t: string, z2High: number, recoveryPoor: boolean): Promise<boolean> {
   if (recoveryPoor) return false;
-  const lastWeek = weekAdherence(userId, addDays(mondayOf(t), -7));
+  const lastWeek = await weekAdherence(userId, addDays(mondayOf(t), -7));
   if (lastWeek === null || lastWeek < 0.9) return false;
-  const easyHr = avgEasyHr(userId, t);
+  const easyHr = await avgEasyHr(userId, t);
   if (easyHr !== null && easyHr > z2High) return false;
   return true;
 }
@@ -461,10 +461,10 @@ function absorbedWell(userId: number, t: string, z2High: number, recoveryPoor: b
  * Recalibrate LTHR and max HR from real watch data. Called after each sync —
  * the zones screen is only as good as the numbers behind it.
  */
-export function recalibrateZones(userId: number): boolean {
+export async function recalibrateZones(userId: number): Promise<boolean> {
   const d = getDb();
-  const profile = getProfile(userId);
-  const row = d
+  const profile = await getProfile(userId);
+  const row = await d
     .prepare(
       `SELECT MAX(max_hr) AS max_hr FROM activities
        WHERE user_id = ? AND max_hr IS NOT NULL AND date(start_date) >= ?`,
@@ -478,7 +478,7 @@ export function recalibrateZones(userId: number): boolean {
   const changed =
     Math.abs((profile.max_hr ?? 0) - newMax) >= 2 || Math.abs((profile.lthr ?? 0) - newLthr) >= 2;
   if (!changed) return false;
-  d.prepare("UPDATE profiles SET max_hr = ?, lthr = ? WHERE user_id = ?").run(
+  await d.prepare("UPDATE profiles SET max_hr = ?, lthr = ? WHERE user_id = ?").run(
     newMax,
     newLthr,
     userId,
@@ -494,11 +494,11 @@ export function recalibrateZones(userId: number): boolean {
  * re-querying per day. Also sent to the browser, which renders day detail
  * with the very same functions.
  */
-export function sessionContext(userId: number, profile?: ProfileRow): SessionContext {
-  const p = profile ?? getProfile(userId);
+export async function sessionContext(userId: number, profile?: ProfileRow): Promise<SessionContext> {
+  const p = profile ?? await getProfile(userId);
   return {
-    zones: zonesFor(userId, p),
-    thresholdPaceSecPerKm: thresholdPace(userId, todayIso(), p.goal_seconds),
+    zones: await zonesFor(userId, p),
+    thresholdPaceSecPerKm: await thresholdPace(userId, todayIso(), p.goal_seconds),
     goalSeconds: p.goal_seconds,
   };
 }
@@ -521,12 +521,12 @@ export function toViewDay(day: PlanDayRow): ViewDay {
   };
 }
 
-export function sessionTargets(userId: number, day: PlanDayRow) {
-  return viewTargets(sessionContext(userId), toViewDay(day));
+export async function sessionTargets(userId: number, day: PlanDayRow) {
+  return viewTargets(await sessionContext(userId), toViewDay(day));
 }
 
-export function segmentsFor(userId: number, day: PlanDayRow) {
-  return viewSegments(sessionContext(userId), toViewDay(day));
+export async function segmentsFor(userId: number, day: PlanDayRow) {
+  return viewSegments(await sessionContext(userId), toViewDay(day));
 }
 
 export { coachNoteFor } from "./session-view";
