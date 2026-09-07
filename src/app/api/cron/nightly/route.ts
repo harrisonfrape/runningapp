@@ -5,7 +5,7 @@ import { syncActivities } from "@/lib/strava";
 import { handleError, json } from "@/lib/api";
 
 export const dynamic = "force-dynamic";
-export const maxDuration = 300;
+export const maxDuration = 60;
 
 /**
  * The nightly job. Garmin's push webhook already adapts the plan the moment
@@ -13,11 +13,19 @@ export const maxDuration = 300;
  * happens even when a push is missed, a token needed refreshing, or the athlete
  * has only ever connected Strava.
  *
- * Point a scheduler at POST /api/cron/nightly (Vercel Cron, systemd timer,
- * GitHub Actions — anything) shortly after the athlete usually wakes, and
- * authorise it with the CRON_SECRET bearer token.
+ * Vercel Cron invokes it with GET and sends CRON_SECRET as a bearer token
+ * automatically; POST is here so a systemd timer, GitHub Action or plain curl
+ * can trigger exactly the same work.
  */
+export async function GET(req: Request) {
+  return run(req);
+}
+
 export async function POST(req: Request) {
+  return run(req);
+}
+
+async function run(req: Request) {
   try {
     const secret = process.env.CRON_SECRET;
     if (!secret) {
@@ -32,9 +40,7 @@ export async function POST(req: Request) {
       id: number;
       email: string;
     }>;
-    const providersFor = await d.prepare(
-      "SELECT provider FROM oauth_tokens WHERE user_id = ?",
-    );
+    const providersFor = d.prepare("SELECT provider FROM oauth_tokens WHERE user_id = ?");
 
     const report: Array<Record<string, unknown>> = [];
 

@@ -171,11 +171,12 @@ See [`.env.example`](.env.example). `APP_URL` must be the exact public origin th
 URIs are registered against, and must be reachable for webhooks to arrive. `APP_SECRET` (32+ random
 characters) is required in production, and `CRON_SECRET` guards the nightly route.
 
-## Deploying to Netlify
+## Deploying to Vercel
 
-Netlify runs the App Router on Functions, which means a read-only filesystem and an ephemeral
-`/tmp` — a local database file would be lost between invocations. That is why the store is Turso
-rather than a file on disk.
+Vercel runs the App Router natively, so `after()` in the webhook routes and the
+scheduled job both work without adaptation. The one thing that does not survive is a
+database on disk: function filesystems are read-only apart from an ephemeral `/tmp`,
+which is why the store is Turso rather than a SQLite file.
 
 1. **Create the database** and keep the two values it prints:
 
@@ -185,27 +186,52 @@ rather than a file on disk.
    turso db tokens create stride     # -> TURSO_AUTH_TOKEN
    ```
 
-2. **Connect the repo** to a Netlify site. [`netlify.toml`](netlify.toml) already sets the build
-   command and loads `@netlify/plugin-nextjs`; nothing else needs configuring.
+2. **Import the repo** at <https://vercel.com/new>. Vercel detects Next.js on its own —
+   leave the build command, output directory and root directory as they come.
 
-3. **Set the environment variables** in Netlify (Site configuration → Environment variables) —
-   every key from `.env.example` that you actually use. `APP_URL` must be the site's real origin,
-   e.g. `https://stride.netlify.app`, and `APP_SECRET` and `CRON_SECRET` must both be set.
+3. **Set the environment variables** (Project → Settings → Environment Variables) for
+   every key in `.env.example` that you use. `APP_URL` must be the deployment's real
+   origin, e.g. `https://stride.vercel.app`, and `APP_SECRET` and `CRON_SECRET` must
+   both be set. Apply them to Production at minimum; Preview too if you want preview
+   deployments to work, though they will share the same database unless you give them
+   their own `TURSO_DATABASE_URL`.
 
-4. **Repoint Strava** once the site is live:
-   - set the app's **Authorization Callback Domain** to the site's host (`netlify.app`, or your
-     custom domain) at <https://www.strava.com/settings/api>
-   - re-register the webhook, because the old subscription still points at the previous origin:
+4. **Repoint Strava** once the deployment is live:
+   - set the app's **Authorization Callback Domain** to the deployment host
+     (`vercel.app`, or your custom domain) at <https://www.strava.com/settings/api>
+   - re-register the webhook, because the old subscription still points at the previous
+     origin:
 
      ```bash
      npm run strava:unsubscribe
      npm run strava:subscribe
      ```
 
-5. **The nightly job** runs itself: [`netlify/functions/nightly.mts`](netlify/functions/nightly.mts)
-   is a scheduled function that calls `/api/cron/nightly` with the `CRON_SECRET` bearer token, so
-   the cron shell, a manual `curl` and Netlify all exercise the same code path.
+### The nightly job on Vercel
 
-One thing to watch on any serverless host: both webhook routes acknowledge inside the provider's
-timeout and finish the work in `after()`. If a deployment ever truncates that background work, move
-the processing above the response — correctness first, the two-second budget second.
+[`vercel.json`](vercel.json) schedules `/api/cron/nightly` at 05:00 UTC. Vercel invokes it
+with a GET and, whenever `CRON_SECRET` is set, sends that value as an `Authorization:
+Bearer` header — which is exactly what the route already checks, so no glue code is
+needed. The route answers POST as well, so a systemd timer, a GitHub Action or a plain
+curl can trigger the same work:
+
+```bash
+curl -X POST https://stride.vercel.app/api/cron/nightly \
+  -H "Authorization: Bearer $CRON_SECRET"
+```
+
+The route refuses to run at all when `CRON_SECRET` is unset, so an unconfigured
+deployment cannot be triggered by whoever finds the URL.
+
+Two things to know about Vercel's scheduler on the Hobby plan: cron jobs may only run
+**once a day** (a more frequent expression fails the deploy), and an invocation lands
+somewhere inside the scheduled hour rather than on the minute. Both are fine for an
+overnight recovery check. The job is also idempotent — a second run in the same day
+makes no further changes — which matters because cron delivery is best-effort and can
+occasionally fire twice or not at all.
+
+## Running it anywhere else
+
+Nothing here is Vercel-specific beyond `vercel.json`. On a host with a persistent disk
+(Fly.io, Render, a VPS) you can point `TURSO_DATABASE_URL` at a local file —
+`file:./data/stride.db` — and run `npm run nightly` from cron instead.
