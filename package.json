@@ -1,0 +1,33 @@
+{
+  "name": "stride",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Stride \u2014 AI marathon coach with real Garmin and Strava integrations",
+  "scripts": {
+    "dev": "next dev -p 3000",
+    "build": "next build",
+    "start": "next start -p 3000",
+    "lint": "next lint",
+    "typecheck": "tsc --noEmit",
+    "strava:subscribe": "tsx --env-file-if-exists=.env --env-file-if-exists=.env.local scripts/strava-subscription.ts create",
+    "strava:subscription": "tsx --env-file-if-exists=.env --env-file-if-exists=.env.local scripts/strava-subscription.ts view",
+    "strava:unsubscribe": "tsx --env-file-if-exists=.env --env-file-if-exists=.env.local scripts/strava-subscription.ts delete",
+    "garmin:backfill": "tsx --env-file-if-exists=.env --env-file-if-exists=.env.local scripts/garmin-backfill.ts",
+    "nightly": "tsx --env-file-if-exists=.env --env-file-if-exists=.env.local scripts/nightly.ts"
+  },
+  "dependencies": {
+    "@anthropic-ai/sdk": "^0.124.0",
+    "better-sqlite3": "^11.10.0",
+    "next": "^15.5.4",
+    "react": "^19.1.0",
+    "react-dom": "^19.1.0"
+  },
+  "devDependencies": {
+    "@types/better-sqlite3": "^7.6.13",
+    "@types/node": "^22.15.0",
+    "@types/react": "^19.1.0",
+    "@types/react-dom": "^19.1.0",
+    "tsx": "^4.20.0",
+    "typescript": "^5.8.0"
+  }
+}
