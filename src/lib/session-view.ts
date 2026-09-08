@@ -77,8 +77,12 @@ function paceFor(ctx: SessionContext, type: SessionType): string {
       return `${paceString(tp * 0.98)} /km`;
     case "hard":
       return `${paceString(tp * 0.93)} /km reps`;
+    case "tuneup":
+      // The plan's own sub-line carries the race target; the band here is just
+      // "faster than threshold", which is what a race of this length is.
+      return `${paceString(tp * 0.97)} /km or quicker`;
     case "race":
-      return `${paceString(ctx.goalSeconds / 42.195)} /km`;
+      return `${paceString(ctx.goalSeconds / MARATHON_KM)} /km`;
   }
 }
 
@@ -93,6 +97,7 @@ function secPerKmFor(ctx: SessionContext, type: SessionType): number {
     marathon: (ctx.goalSeconds / MARATHON_KM) * 0.5 + tp * 1.25 * 0.5,
     tempo: tp * 1.05,
     hard: tp * 1.08,
+    tuneup: tp * 0.97,
     race: ctx.goalSeconds / 42.195,
   }[type];
 }
@@ -129,6 +134,8 @@ export function coachNoteFor(type: SessionType): string {
     tempo:
       "Comfortably hard, and no harder. The point is time at threshold, not a race — finish knowing you could have held it another kilometre.",
     hard: "Quality day. Finish the last rep feeling like you had one more in the tank — form tall, effort controlled.",
+    tuneup:
+      "Race it properly — this is the sharpest read on your marathon fitness you'll get before the day, and the result feeds straight into your projection. Warm up thoroughly, start controlled, take the last third hard. The easy days either side of it are already in the plan.",
     race: "Everything you built, on the day. Go out at goal pace and trust the block.",
   }[type];
 }

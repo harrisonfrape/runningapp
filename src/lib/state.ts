@@ -18,8 +18,8 @@ import {
   trainingLoad,
   weeklyVolumes,
 } from "./metrics";
-import {
-  addDays,
+import type { PlanInput } from "./plan";
+import { addDays,
   blockOverview,
   daysBetween,
   mondayOf,
@@ -27,12 +27,12 @@ import {
   peakVolume,
   phaseFor,
   weeksBetween,
-  typeColor,
-} from "./plan";
+  typeColor, equivalentTime } from "./plan";
 import { anthropicConfigured } from "./coach";
 import { stravaConfig } from "./strava";
 import { garminConfig } from "./garmin";
 import type { Zone } from "./types";
+import { listRaces } from "./races";
 
 export interface AppState {
   user: { name: string; email: string };
@@ -99,6 +99,16 @@ export interface AppState {
     factors: Array<{ label: string; value: string }>;
     note: string;
     milestones: Array<{ when: string; title: string; desc: string }>;
+    tuneUps: Array<{
+      id: number;
+      name: string;
+      date: string;
+      dateLabel: string;
+      distanceKm: number;
+      distanceLabel: string;
+      target: string;
+      past: boolean;
+    }>;
   };
   log: Array<{
     id: number;
@@ -182,7 +192,7 @@ export async function buildState(userId: number, user: { name: string; email: st
     planDays.find((x) => x.date >= t)?.week ??
     Math.max(1, totalWeeks);
 
-  const planInput = {
+  const planInput: PlanInput = {
     planStart: profile.plan_start ?? mondayOf(t),
     raceDate: profile.race_date,
     baselineKm: four.km || 10,
@@ -192,6 +202,7 @@ export async function buildState(userId: number, user: { name: string; email: st
       const l = await longestRun(userId, t);
       return l ? km(l) : 0;
     })(),
+    tuneUps: await listRaces(userId),
   };
 
   const banner = await d
@@ -411,6 +422,21 @@ export async function buildState(userId: number, user: { name: string; email: st
       factors: readiness.factors,
       note: readiness.note,
       milestones,
+      tuneUps: (planInput.tuneUps ?? []).map((r) => ({
+        id: r.id,
+        name: r.name,
+        date: r.date,
+        dateLabel: new Date(`${r.date}T00:00:00Z`).toLocaleDateString("en-GB", {
+          day: "numeric",
+          month: "short",
+          year: "numeric",
+          timeZone: "UTC",
+        }),
+        distanceKm: r.distanceKm,
+        distanceLabel: `${r.distanceKm.toFixed(r.distanceKm % 1 === 0 ? 0 : 2)} km`,
+        target: formatDuration(r.goalSeconds ?? equivalentTime(profile.goal_seconds, r.distanceKm)),
+        past: r.date < t,
+      })),
     },
     log: runs.map((a) => ({
       id: a.id,

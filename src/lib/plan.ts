@@ -1,4 +1,4 @@
-import type { Phase, SessionType } from "./types";
+import type { Phase, SessionType, TuneUpRace } from "./types";
 import { paceString } from "./zones";
 
 export interface PlanInput {
@@ -8,6 +8,7 @@ export interface PlanInput {
   baselineRunsPerWeek: number;
   goalSeconds: number; // marathon goal
   longestRecentKm: number;
+  tuneUps?: TuneUpRace[]; // races inside the block, e.g. a tune-up half
 }
 
 export interface GeneratedDay {
@@ -242,6 +243,15 @@ export function goalPaceSecPerKm(goalSeconds: number): number {
   return goalSeconds / MARATHON_KM;
 }
 
+/**
+ * Riegel run downwards: what the athlete's marathon goal is worth over a
+ * shorter distance. Used to set a sensible target for a tune-up race when they
+ * have not named one themselves — a 3:30 marathon is a 1:40 half, not a 1:45.
+ */
+export function equivalentTime(goalSeconds: number, distanceKm: number): number {
+  return goalSeconds * Math.pow(distanceKm / MARATHON_KM, 1.06);
+}
+
 /** How much of a marathon-pace long run is actually run at goal pace. */
 export function marathonPaceKm(km: number): number {
   return Math.max(5, Math.min(16, Math.round(km * 0.5)));
@@ -318,6 +328,8 @@ function describe(
         zone: "Z4",
       };
     }
+    case "tuneup":
+      return { title: "Tune-up race", sub: "Race effort.", zone: "Z4" };
     case "race":
       return { title: "Race day", sub: "Everything you built, on the day.", zone: "Z3" };
   }
@@ -398,7 +410,80 @@ export function generatePlan(input: PlanInput): GeneratedDay[] {
       });
     }
   }
+  applyTuneUps(days, input);
   return days;
+}
+
+function raceTimeLabel(seconds: number): string {
+  const t = Math.round(seconds);
+  const h = Math.floor(t / 3600);
+  const m = Math.floor((t % 3600) / 60);
+  const sec = t % 60;
+  return h > 0
+    ? `${h}:${String(m).padStart(2, "0")}:${String(sec).padStart(2, "0")}`
+    : `${m}:${String(sec).padStart(2, "0")}`;
+}
+
+/**
+ * Folds the athlete's tune-up races into a generated block.
+ *
+ * A race inside a marathon build is not just a hard day with a number on the
+ * chest — it needs a few easy days going in and rather more coming out, or it
+ * costs more than it teaches. Published blocks handle it the same way: cut the
+ * last few days back sharply, race, then keep everything easy until the legs
+ * come back. A half is roughly a week of that on either side; the plan gives
+ * three days in and four out, and drops any quality that lands in between.
+ */
+export function applyTuneUps(days: GeneratedDay[], input: PlanInput): void {
+  const races = (input.tuneUps ?? []).filter(
+    (r) => r.date > input.planStart && r.date < input.raceDate,
+  );
+  if (!races.length) return;
+  const byDate = new Map(days.map((d) => [d.date, d]));
+
+  const reshape = (date: string, type: SessionType, cap: number) => {
+    const day = byDate.get(date);
+    // Never overwrite the goal race or another tune-up.
+    if (!day || day.type === "race" || day.type === "tuneup") return;
+    // A rest day is already the lightest a day can be — easing off around a
+    // race must never hand somebody a run they did not have before.
+    if (day.type === "rest") return;
+    day.type = type;
+    day.km = type === "rest" ? 0 : Math.round(Math.min(day.km, cap) * 2) / 2;
+    const copy = describe(type, day.km, day.week, day.phase, input);
+    day.title = copy.title;
+    day.sub = copy.sub;
+    day.zone = copy.zone;
+  };
+
+  for (const race of races) {
+    const day = byDate.get(race.date);
+    if (!day) continue;
+
+    // Going in: three days of sharpening down, the last of them off the feet.
+    reshape(addDays(race.date, -3), "easy", 8);
+    reshape(addDays(race.date, -2), "easy", 5);
+    reshape(addDays(race.date, -1), "rest", 0);
+
+    // Coming out: no quality for four days, and the first of them off entirely.
+    reshape(addDays(race.date, 1), "rest", 0);
+    reshape(addDays(race.date, 2), "recovery", 5);
+    reshape(addDays(race.date, 3), "easy", 8);
+    const fourth = byDate.get(addDays(race.date, 4));
+    if (fourth && (fourth.type === "hard" || fourth.type === "tempo" || fourth.type === "marathon")) {
+      reshape(fourth.date, "easy", 10);
+    }
+
+    // Race day itself.
+    const target = race.goalSeconds ?? equivalentTime(input.goalSeconds, race.distanceKm);
+    day.type = "tuneup";
+    day.km = race.distanceKm;
+    day.title = race.name;
+    day.sub = `${race.distanceKm} km race — target ${raceTimeLabel(target)} (${paceString(
+      target / race.distanceKm,
+    )}/km). A real effort, and the best read on marathon fitness you'll get.`;
+    day.zone = "Z4";
+  }
 }
 
 /** Block-overview rows for the Plan screen. */

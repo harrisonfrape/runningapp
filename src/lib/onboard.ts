@@ -4,6 +4,7 @@ import { fourWeekAverage, km, longestRun, today as todayIso } from "./metrics";
 import { getProfile, matchActivitiesToPlan, recalibrateZones } from "./adapt";
 import { estimateLthrFromMax } from "./zones";
 import { appendMessage, welcomeMessage } from "./coach";
+import { listRaces } from "./races";
 
 /** Inputs for the generator, measured from the athlete's real Strava history. */
 export async function planInputFor(userId: number): Promise<PlanInput> {
@@ -18,6 +19,7 @@ export async function planInputFor(userId: number): Promise<PlanInput> {
     baselineRunsPerWeek: Math.max(1, Math.round(four.runs) || 2),
     goalSeconds: profile.goal_seconds,
     longestRecentKm: longest ? km(longest) : 0,
+    tuneUps: await listRaces(userId),
   };
 }
 

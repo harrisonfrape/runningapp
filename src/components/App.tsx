@@ -278,7 +278,7 @@ export default function App({ initialState }: { initialState: AppState }) {
         {tab === "zones" && <ZonesTab state={state} />}
         {tab === "progress" && <ProgressTab state={state} />}
         {tab === "recovery" && <RecoveryTab state={state} onRefresh={refresh} />}
-        {tab === "race" && <RaceTab state={state} />}
+        {tab === "race" && <RaceTab state={state} onRefresh={refresh} />}
         {tab === "log" && <LogTab state={state} onRefresh={refresh} />}
         {tab === "coach" && <CoachTab state={state} onRefresh={refresh} />}
       </main>

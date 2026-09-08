@@ -231,6 +231,15 @@ const SCHEMA: string[] = [
      processed INTEGER NOT NULL DEFAULT 0,
      error TEXT
    )`,
+  `CREATE TABLE IF NOT EXISTS tune_up_races (
+     id INTEGER PRIMARY KEY AUTOINCREMENT,
+     user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+     name TEXT NOT NULL,
+     date TEXT NOT NULL,
+     distance_km REAL NOT NULL,
+     goal_seconds INTEGER,
+     UNIQUE(user_id, date)
+   )`,
   `CREATE INDEX IF NOT EXISTS idx_activities_user_date ON activities(user_id, start_date DESC)`,
   `CREATE INDEX IF NOT EXISTS idx_plan_user_date ON plan_days(user_id, date)`,
   `CREATE INDEX IF NOT EXISTS idx_recovery_user_date ON recovery(user_id, date DESC)`,

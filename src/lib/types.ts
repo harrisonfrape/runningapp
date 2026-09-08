@@ -8,6 +8,7 @@ export type SessionType =
   | "marathon"
   | "hard"
   | "tempo"
+  | "tuneup"
   | "race";
 
 export type Phase = "Prep" | "Base" | "Build" | "Strength" | "Sharpen" | "Peak" | "Taper";
@@ -100,3 +101,29 @@ export interface Zone {
   lowHr: number;
   highHr: number;
 }
+
+/**
+ * A race inside the block that is not the goal race — a tune-up half, a 10K,
+ * a parkrun effort. The plan tapers into it and recovers out of it, and the
+ * result becomes the best anchor the finish projection has.
+ */
+export interface TuneUpRace {
+  id: number;
+  name: string;
+  date: string;
+  distanceKm: number;
+  goalSeconds: number | null;
+}
+
+/**
+ * Common race distances, so the athlete picks one rather than typing a number.
+ * Lives here rather than in races.ts because the picker is a client component
+ * and races.ts reaches for the database.
+ */
+export const RACE_DISTANCES: Array<{ label: string; km: number }> = [
+  { label: "5K", km: 5 },
+  { label: "10K", km: 10 },
+  { label: "10 miles", km: 16.09 },
+  { label: "Half marathon", km: 21.0975 },
+  { label: "20 miles", km: 32.19 },
+];
