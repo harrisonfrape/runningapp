@@ -95,14 +95,7 @@ export default function TodayTab({
       <p style={{ color: C.text2, fontSize: 15, lineHeight: 1.6, maxWidth: 640, margin: "0 0 32px" }}>
         {workout.coachNote}
       </p>
-      <div
-        style={{
-          display: "grid",
-          gridTemplateColumns: "1fr 340px",
-          gap: 28,
-          alignItems: "start",
-        }}
-      >
+      <div className="split-today">
         <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
           {workout.segments.map((s, i) => (
             <div

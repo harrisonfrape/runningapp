@@ -91,13 +91,13 @@ export default function CoachTab({
         </div>
       )}
       <div
+        className="chat-panel"
         style={{
           background: C.card,
           border: `1px solid ${C.border}`,
           borderRadius: 16,
           display: "flex",
           flexDirection: "column",
-          height: 560,
           maxWidth: 780,
         }}
       >
@@ -168,6 +168,7 @@ export default function CoachTab({
             placeholder="e.g. I'm feeling tired — should I still do tomorrow's intervals?"
             style={{
               flex: 1,
+              minWidth: 0,
               border: `1px solid ${C.border}`,
               borderRadius: 10,
               padding: "13px 16px",

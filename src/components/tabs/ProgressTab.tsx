@@ -11,14 +11,7 @@ export default function ProgressTab({ state }: { state: AppState }) {
     <>
       <h1 style={{ ...h1, marginBottom: 28 }}>Progress</h1>
 
-      <div
-        style={{
-          display: "grid",
-          gridTemplateColumns: "repeat(4, 1fr)",
-          gap: 12,
-          marginBottom: 32,
-        }}
-      >
+      <div className="grid-stat4" style={{ marginBottom: 32 }}>
         {state.progress.stats.map((c) => (
           <div
             key={c.label}
@@ -69,7 +62,7 @@ export default function ProgressTab({ state }: { state: AppState }) {
           <div style={{ fontWeight: 700, fontSize: 15 }}>Weekly volume</div>
           <div style={{ fontSize: 12.5, color: C.muted }}>last 8 weeks + this week, km</div>
         </div>
-        <div style={{ display: "flex", alignItems: "flex-end", gap: 14, height: 160 }}>
+        <div className="bar-chart" style={{ height: 160 }}>
           {bars.map((b) => (
             <div
               key={b.label}
@@ -120,14 +113,11 @@ export default function ProgressTab({ state }: { state: AppState }) {
           {state.progress.recentRuns.map((r) => (
             <div
               key={r.id}
+              className="grid-runs"
               style={{
-                display: "grid",
-                gridTemplateColumns: "110px 1fr 90px 90px 110px",
-                gap: 16,
                 padding: "13px 0",
                 borderBottom: `1px solid ${C.raised}`,
                 fontSize: 13.5,
-                alignItems: "center",
               }}
             >
               <div style={{ color: C.muted }}>{r.date}</div>

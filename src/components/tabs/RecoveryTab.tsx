@@ -50,15 +50,7 @@ export default function RecoveryTab({
         day&apos;s session is automatically softened to keep injury risk down.
       </p>
 
-      <div
-        style={{
-          display: "grid",
-          gridTemplateColumns: "320px 1fr",
-          gap: 20,
-          marginBottom: 24,
-          alignItems: "start",
-        }}
-      >
+      <div className="split-recovery" style={{ marginBottom: 24 }}>
         <div style={{ background: C.panel, color: C.text, borderRadius: 16, padding: 30 }}>
           <div
             style={{
@@ -90,7 +82,7 @@ export default function RecoveryTab({
             {r.summary}
           </div>
         </div>
-        <div style={{ display: "grid", gridTemplateColumns: "repeat(2, 1fr)", gap: 12 }}>
+        <div className="grid-metric2">
           {r.metrics.map((m) => (
             <div
               key={m.label}
@@ -143,7 +135,7 @@ export default function RecoveryTab({
           <div style={{ fontWeight: 700, fontSize: 15 }}>Sleep, last 7 nights</div>
           <div style={{ fontSize: 12.5, color: C.muted }}>hours · colour = Garmin sleep score</div>
         </div>
-        <div style={{ display: "flex", alignItems: "flex-end", gap: 14, height: 140 }}>
+        <div className="bar-chart" style={{ height: 140 }}>
           {r.sleepBars.map((b) => {
             const hours = Number(b.hours);
             const height = Number.isFinite(hours) ? Math.round((hours / maxHours) * 100) + 8 : 6;

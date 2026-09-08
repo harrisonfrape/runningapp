@@ -8,14 +8,7 @@ export default function RaceTab({ state }: { state: AppState }) {
   return (
     <>
       <h1 style={{ ...h1, marginBottom: 28 }}>Race readiness</h1>
-      <div
-        style={{
-          display: "grid",
-          gridTemplateColumns: "1fr 1fr",
-          gap: 20,
-          marginBottom: 24,
-        }}
-      >
+      <div className="grid-race2" style={{ marginBottom: 24 }}>
         <div style={{ background: C.panel, color: C.text, borderRadius: 16, padding: 32 }}>
           <div
             style={{
@@ -113,7 +106,7 @@ export default function RaceTab({ state }: { state: AppState }) {
       </div>
 
       <h2 style={h2}>Milestones on the way</h2>
-      <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 12 }}>
+      <div className="grid-miles3">
         {r.milestones.map((m) => (
           <div
             key={m.title}

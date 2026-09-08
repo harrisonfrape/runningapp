@@ -57,14 +57,18 @@ function wrap(c: Client): Db {
     await ensureMigrated();
     return c.execute({ sql, args: args as InArgs });
   };
+  // libSQL hands back Row objects that carry a custom prototype. React refuses
+  // to pass those from a server component to a client one, so every row is
+  // copied into a plain object on the way out.
+  const plain = (row: unknown) => ({ ...(row as object) });
   const statement = (sql: string): Statement => ({
     async get(...args: Arg[]) {
       const res = await execute(sql, args);
-      return res.rows[0] ?? undefined;
+      return res.rows[0] === undefined ? undefined : plain(res.rows[0]);
     },
     async all(...args: Arg[]) {
       const res = await execute(sql, args);
-      return res.rows;
+      return res.rows.map(plain);
     },
     async run(...args: Arg[]): Promise<RunResult> {
       const res = await execute(sql, args);

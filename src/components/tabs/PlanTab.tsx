@@ -93,14 +93,7 @@ export default function PlanTab({
         </div>
       </div>
 
-      <div
-        style={{
-          display: "grid",
-          gridTemplateColumns: "repeat(7, 1fr)",
-          gap: 10,
-          marginBottom: 32,
-        }}
-      >
+      <div className="grid-week" style={{ marginBottom: 32 }}>
         {week.days.map((d) => (
           <div
             key={d.date}
@@ -161,12 +154,9 @@ export default function PlanTab({
               border: `1px solid ${C.border}`,
               borderRadius: 10,
               padding: "12px 18px",
-              display: "grid",
-              gridTemplateColumns: "90px 110px 1fr 120px",
-              gap: 16,
-              alignItems: "center",
               fontSize: 13.5,
             }}
+            className="grid-block"
           >
             <div style={{ fontWeight: 600 }}>Week {w.n}</div>
             <div style={{ color: w.phaseColor, fontWeight: 600 }}>{w.phase}</div>

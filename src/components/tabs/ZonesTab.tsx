@@ -17,18 +17,15 @@ export default function ZonesTab({ state }: { state: AppState }) {
         {state.zones.map((z) => (
           <div
             key={z.key}
+            className="grid-zone"
             style={{
               background: C.card,
               border: `1px solid ${C.border}`,
               borderRadius: 12,
               padding: "18px 22px",
-              display: "grid",
-              gridTemplateColumns: "12px 150px 1fr 130px 110px",
-              gap: 18,
-              alignItems: "center",
             }}
           >
-            <div style={{ width: 12, height: 44, borderRadius: 6, background: z.color }} />
+            <div className="zone-bar" style={{ background: z.color }} />
             <div>
               <div style={{ fontWeight: 700, fontSize: 14.5 }}>{z.name}</div>
               <div style={{ fontSize: 12.5, color: C.muted }}>{z.pct}</div>

@@ -117,20 +117,19 @@ export default function App({ initialState }: { initialState: AppState }) {
   return (
     <div style={{ minHeight: "100vh", display: "flex", flexDirection: "column" }}>
       <header
+        className="hdr"
         style={{
           background: C.bg,
           borderBottom: `1px solid ${C.border}`,
-          padding: "0 32px",
-          display: "flex",
-          alignItems: "center",
-          gap: 28,
-          height: 64,
           position: "sticky",
           top: 0,
           zIndex: 10,
         }}
       >
-        <div style={{ display: "flex", alignItems: "center", gap: 10, marginRight: 12 }}>
+        <div
+          className="hdr-brand"
+          style={{ display: "flex", alignItems: "center", gap: 10, marginRight: 12 }}
+        >
           <div
             style={{
               width: 26,
@@ -149,7 +148,7 @@ export default function App({ initialState }: { initialState: AppState }) {
           </div>
           <div style={{ fontWeight: 600, letterSpacing: "0.04em", fontSize: 13 }}>STRIDE</div>
         </div>
-        <nav style={{ display: "flex", gap: 4, flex: 1 }}>
+        <nav className="hdr-nav">
           {TABS.map(([id, label]) => (
             <button
               key={id}
@@ -175,7 +174,7 @@ export default function App({ initialState }: { initialState: AppState }) {
         </nav>
         <button
           onClick={syncStrava}
-          className="btn-soft"
+          className="btn-soft hdr-sync"
           style={{
             background: C.card,
             border: `1px solid ${C.border}`,
@@ -210,11 +209,12 @@ export default function App({ initialState }: { initialState: AppState }) {
 
       {state.banner && (
         <div
+          className="strip"
           style={{
             background: C.successBg,
             borderBottom: `1px solid ${C.successBorder}`,
-            padding: "12px 32px",
             display: "flex",
+            flexWrap: "wrap",
             alignItems: "center",
             gap: 12,
             fontSize: 14,
@@ -242,10 +242,10 @@ export default function App({ initialState }: { initialState: AppState }) {
 
       {syncNote && (
         <div
+          className="strip"
           style={{
             background: C.card,
             borderBottom: `1px solid ${C.border}`,
-            padding: "10px 32px",
             display: "flex",
             alignItems: "center",
             gap: 12,
@@ -270,15 +270,7 @@ export default function App({ initialState }: { initialState: AppState }) {
         </div>
       )}
 
-      <main
-        style={{
-          flex: 1,
-          width: "100%",
-          maxWidth: 1120,
-          margin: "0 auto",
-          padding: "36px 32px 80px",
-        }}
-      >
+      <main className="shell-main">
         {tab === "plan" && <PlanTab state={state} onOpenDay={openDay} />}
         {tab === "today" && (
           <TodayTab state={state} date={viewDate} onAskCoach={() => setTab("coach")} />

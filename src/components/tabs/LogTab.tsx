@@ -89,15 +89,7 @@ export default function LogTab({
         <div style={{ fontSize: 14, color: C.muted, marginBottom: 26 }}>
           {run.date} · {run.km} km · {run.pace} · {run.hr}
         </div>
-        <div
-          style={{
-            display: "grid",
-            gridTemplateColumns: "1fr 380px",
-            gap: 28,
-            alignItems: "start",
-            maxWidth: 980,
-          }}
-        >
+        <div className="split-log">
           <div
             style={{
               background: C.card,
@@ -272,16 +264,12 @@ export default function LogTab({
           <div
             key={r.id}
             onClick={() => setSelected(r.id)}
-            className="card-click"
+            className="card-click grid-logrow"
             style={{
               background: C.card,
               border: `1px solid ${C.border}`,
               borderRadius: 12,
               padding: "16px 20px",
-              display: "grid",
-              gridTemplateColumns: "100px 1fr 80px 90px 110px 110px",
-              gap: 14,
-              alignItems: "center",
               fontSize: 13.5,
               cursor: "pointer",
             }}
