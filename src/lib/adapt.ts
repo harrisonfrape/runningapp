@@ -158,21 +158,32 @@ export async function runAdaptation(
         rec.hrvDelta !== null && rec.hrvDelta <= -10
           ? `HRV is ${Math.abs(rec.hrvDelta)} ms under baseline`
           : `sleep came up short at ${rec.sleepHours?.toFixed(1)} h`;
-      if (tomorrow.type === "hard" || tomorrow.type === "tempo") {
-        const newKm = Math.round(tomorrow.km * 0.7 * 2) / 2;
+      // A marathon-pace long run is a quality session too: on poor recovery the
+      // goal-pace work comes out, but it stays a long run rather than being cut
+      // to a short easy jog — the aerobic time on feet is still worth having.
+      const wasMarathonPace = tomorrow.type === "marathon";
+      if (tomorrow.type === "hard" || tomorrow.type === "tempo" || wasMarathonPace) {
+        const newKm = Math.round(tomorrow.km * (wasMarathonPace ? 0.85 : 0.7) * 2) / 2;
         await applyChange(
           tomorrow,
           {
-            title: "Easy run — session softened",
-            sub: `Quality moved: ${detail}. Keep it conversational and capped at ${cap} bpm.`,
+            title: wasMarathonPace ? "Long run — pace work dropped" : "Easy run — session softened",
+            sub: wasMarathonPace
+              ? `Goal-pace block pulled: ${detail}. Run it easy and capped at ${cap} bpm.`
+              : `Quality moved: ${detail}. Keep it conversational and capped at ${cap} bpm.`,
             km: newKm,
-            type: "easy",
+            type: wasMarathonPace ? "long" : "easy",
             zone: "Z2",
             hr_cap: cap,
           },
           `softened — ${detail}`,
         );
-        notes.push({ cause: "recovery", text: `swapped ${dayLabel(tomorrow.date)}'s quality session for an easy run` });
+        notes.push({
+          cause: "recovery",
+          text: wasMarathonPace
+            ? `dropped the goal-pace block from ${dayLabel(tomorrow.date)}'s long run`
+            : `swapped ${dayLabel(tomorrow.date)}'s quality session for an easy run`,
+        });
       } else {
         const newKm = Math.round(tomorrow.km * 0.75 * 2) / 2;
         await applyChange(

@@ -1,4 +1,5 @@
 import type { SessionType, Zone } from "./types";
+import { MARATHON_KM, marathonPaceKm } from "./plan";
 import { paceString } from "./zones";
 
 /**
@@ -52,6 +53,7 @@ export function typeColor(t: SessionType): string {
       hard: "#D97B4F",
       tempo: "#E3B34C",
       long: "#7FB89A",
+      marathon: "#E3B34C",
       race: "#C24A3D",
     } as Record<SessionType, string>
   )[t];
@@ -69,6 +71,8 @@ function paceFor(ctx: SessionContext, type: SessionType): string {
       return `${paceString(tp * 1.35)}+ /km`;
     case "long":
       return `${paceString(tp * 1.2)}–${paceString(tp * 1.3)} /km`;
+    case "marathon":
+      return `${paceString(ctx.goalSeconds / MARATHON_KM)} /km at pace`;
     case "tempo":
       return `${paceString(tp * 0.98)} /km`;
     case "hard":
@@ -85,6 +89,8 @@ function secPerKmFor(ctx: SessionContext, type: SessionType): number {
     easy: tp * 1.26,
     recovery: tp * 1.38,
     long: tp * 1.25,
+    // Half the run at goal pace, half easy.
+    marathon: (ctx.goalSeconds / MARATHON_KM) * 0.5 + tp * 1.25 * 0.5,
     tempo: tp * 1.05,
     hard: tp * 1.08,
     race: ctx.goalSeconds / 42.195,
@@ -118,6 +124,8 @@ export function coachNoteFor(type: SessionType): string {
     recovery:
       "Slower than feels natural. This run exists to flush the legs and protect the next quality session, nothing more.",
     long: "The cornerstone of the week. Settle in, stay relaxed, and practise fuelling — gels or carbs after the first hour, every 30–40 minutes.",
+    marathon:
+      "The most race-specific session in the block. Run easy until the pace block, then lock onto goal pace and hold it — this is where you learn what it feels like on tired legs, and where your fuelling gets rehearsed properly.",
     tempo:
       "Comfortably hard, and no harder. The point is time at threshold, not a race — finish knowing you could have held it another kilometre.",
     hard: "Quality day. Finish the last rep feeling like you had one more in the tank — form tall, effort controlled.",
@@ -138,6 +146,34 @@ export async function segmentsFor(ctx: SessionContext, day: ViewDay): Promise<Se
         target: "—",
         zone: "—",
         color: "#3A4A41",
+      },
+    ];
+  }
+
+  if (day.type === "marathon") {
+    const mp = marathonPaceKm(day.km);
+    const easy = Math.max(0, Math.round((day.km - mp) * 10) / 10);
+    return [
+      {
+        name: "Easy opening",
+        detail: `${Math.round(easy * 0.6 * 10) / 10} km relaxed, settle in`,
+        target: `${paceString(tp * 1.25)} /km`,
+        zone: "Z2",
+        color: z[1].color,
+      },
+      {
+        name: "Marathon-pace block",
+        detail: `${mp} km at goal pace`,
+        target: `${paceString(ctx.goalSeconds / MARATHON_KM)} /km`,
+        zone: "Z3",
+        color: z[2].color,
+      },
+      {
+        name: "Easy finish",
+        detail: `${Math.round(easy * 0.4 * 10) / 10} km, hold form`,
+        target: `${paceString(tp * 1.3)} /km`,
+        zone: "Z2",
+        color: z[1].color,
       },
     ];
   }

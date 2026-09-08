@@ -134,7 +134,13 @@ export function startVolume(baselineKm: number): number {
  */
 export function peakVolume(goalSeconds: number, baselineKm: number, buildWeeks = 30): number {
   const goalHours = goalSeconds / 3600;
-  const byGoal = goalHours <= 3 ? 85 : goalHours <= 3.5 ? 62 : goalHours <= 4 ? 52 : 45;
+  // Peak weekly volume by goal, taken from the bands published marathon plans
+  // actually train at: Pfitzinger's 55-70 km and 70-88 km schedules, Daniels'
+  // 2Q plans and Higdon's intermediate blocks all land here for these times.
+  // A 3:30 marathon off 62 km/week left the long run at more than half the
+  // week once it reached 32 km, which is what pushed the easy days down to
+  // token 5 km efforts.
+  const byGoal = goalHours <= 3 ? 95 : goalHours <= 3.5 ? 80 : goalHours <= 4 ? 65 : 55;
   const byRamp = startVolume(baselineKm) * Math.pow(1.055, Math.max(1, buildWeeks - 1));
   return Math.round(Math.max(Math.min(byGoal, byRamp), startVolume(baselineKm) * 1.5));
 }
@@ -171,12 +177,12 @@ export function weekVolume(
  * without inflating every other day.
  */
 const LONG_SHARE: Record<Phase, number> = {
-  Prep: 0.36,
-  Base: 0.34,
-  Build: 0.38,
-  Strength: 0.42,
-  Sharpen: 0.46,
-  Peak: 0.54,
+  Prep: 0.3,
+  Base: 0.32,
+  Build: 0.35,
+  Strength: 0.4,
+  Sharpen: 0.42,
+  Peak: 0.45,
   Taper: 0.3,
 };
 
@@ -202,11 +208,19 @@ function runsPerWeekFor(phase: Phase, week: number, baselineRuns: number): numbe
  * Day slots for a week. Monday always rests; Saturday is always the long run.
  * Quality lands midweek so there are two easy days on either side of it.
  */
-function weekSlots(phase: Phase, runs: number): DaySlot[] {
+function weekSlots(phase: Phase, runs: number, week: number): DaySlot[] {
   const rest: DaySlot = { type: "rest", weight: 0 };
   const slots: DaySlot[] = [rest, rest, rest, rest, rest, rest, rest];
   const longWeight = LONG_SHARE[phase];
-  slots[5] = { type: "long", weight: longWeight };
+  // Marathon-pace long runs are the race-specific session every published plan
+  // is built around — Pfitzinger's "marathon-pace long run", Hansons' tempo
+  // work, Daniels' quality long runs. They alternate with a plain aerobic long
+  // run so the block still has genuinely easy weekends to recover on.
+  const raceSpecific = phase === "Strength" || phase === "Sharpen" || phase === "Peak";
+  slots[5] = {
+    type: raceSpecific && week % 2 === 0 ? "marathon" : "long",
+    weight: longWeight,
+  };
   const quality: SessionType =
     phase === "Prep" || phase === "Base" ? "hard" : phase === "Build" ? "tempo" : "hard";
   slots[2] = { type: quality, weight: 0.22 };
@@ -221,8 +235,16 @@ function weekSlots(phase: Phase, runs: number): DaySlot[] {
 
 /* ---------- copy ---------- */
 
+/** The marathon, to the metre. Every pace and projection is derived from this. */
+export const MARATHON_KM = 42.195;
+
 export function goalPaceSecPerKm(goalSeconds: number): number {
-  return goalSeconds / 42.195;
+  return goalSeconds / MARATHON_KM;
+}
+
+/** How much of a marathon-pace long run is actually run at goal pace. */
+export function marathonPaceKm(km: number): number {
+  return Math.max(5, Math.min(16, Math.round(km * 0.5)));
 }
 
 /** Threshold pace ≈ marathon goal pace minus ~20 s/km for a well-trained runner. */
@@ -262,6 +284,17 @@ function describe(
       };
     case "recovery":
       return { title: "Recovery run", sub: "Very easy shakeout.", zone: "Z1" };
+    case "marathon": {
+      // Pfitzinger's marathon-pace long runs run roughly half the session at
+      // goal pace; the easy kilometres either side are what make it a long run
+      // rather than a race.
+      const mp = marathonPaceKm(km);
+      return {
+        title: "Marathon-pace long run",
+        sub: `${mp} km at goal pace inside a ${km} km run — easy either side.`,
+        zone: "Z3",
+      };
+    }
     case "long":
       return {
         title: "Long run",
@@ -301,8 +334,10 @@ export function generatePlan(input: PlanInput): GeneratedDay[] {
     const phase = phaseFor(week, totalWeeks);
     const volume = weekVolume(week, totalWeeks, input);
     const runs = runsPerWeekFor(phase, week, input.baselineRunsPerWeek);
-    const slots = weekSlots(phase, runs);
+    const slots = weekSlots(phase, runs, week);
     const weekStart = addDays(input.planStart, (week - 1) * 7);
+
+    const weekDays: Array<{ date: string; dayIdx: number; type: SessionType; km: number }> = [];
 
     for (let dayIdx = 0; dayIdx < 7; dayIdx++) {
       const date = addDays(weekStart, dayIdx);
@@ -311,33 +346,54 @@ export function generatePlan(input: PlanInput): GeneratedDay[] {
       const slot = slots[dayIdx];
       const raw = slot.weight ? Math.round(volume * slot.weight * 2) / 2 : 0;
       const type: SessionType = isRaceDay ? "race" : slot.type;
+      const isLong = type === "long" || type === "marathon";
       let km = raw;
       if (km > 0) {
         // A run worth lacing up for — no 1.5 km "sessions" in the early weeks.
-        km = Math.max(km, type === "long" ? 5 : type === "recovery" ? 3 : 3.5);
+        km = Math.max(km, isLong ? 5 : type === "recovery" ? 3 : 3.5);
         // Someone who has already run 14 km does not start with a 6 km long run:
         // hold the long run near the endurance they already have.
-        if (type === "long" && input.longestRecentKm > 0) {
+        if (isLong && input.longestRecentKm > 0) {
           km = Math.round(Math.max(km, Math.min(input.longestRecentKm * 0.65, volume * 0.5)) * 2) / 2;
         }
         // The long run is the one session with an absolute ceiling: past ~32 km
-        // the cost in recovery outweighs anything it adds on race day.
-        if (type === "long") km = Math.min(km, MAX_LONG_RUN_KM);
+        // the cost in recovery outweighs anything it adds on race day. This
+        // holds for the marathon-pace long runs too — they are longer in effort
+        // than an easy run of the same distance, not shorter.
+        if (isLong) km = Math.min(km, MAX_LONG_RUN_KM);
         // Interval sessions carry a whole number of reps, so the session
         // distance is whatever those reps plus warm-up and cool-down come to.
         if (type === "hard") km = kmForReps(repsForKm(km));
       }
-      if (isRaceDay) km = 42.2;
-      const copy = describe(type, km, week, phase, input);
+      if (isRaceDay) km = MARATHON_KM;
+      weekDays.push({ date, dayIdx, type, km });
+    }
+
+    // The long-run ceiling and the whole-rep interval sessions both round the
+    // week down, which used to leave a peak week planned at 80 km generating
+    // barely 70. Give the difference back to the easy running, which is where
+    // the aerobic volume belongs anyway.
+    if (!weekDays.some((d) => d.type === "race")) {
+      const planned = weekDays.reduce((a, d) => a + d.km, 0);
+      const shortfall = volume - planned;
+      const absorbers = weekDays.filter((d) => d.type === "easy" || d.type === "recovery");
+      if (shortfall >= 0.5 && absorbers.length) {
+        const each = Math.round((shortfall / absorbers.length) * 2) / 2;
+        for (const d of absorbers) d.km = Math.round((d.km + each) * 2) / 2;
+      }
+    }
+
+    for (const d of weekDays) {
+      const copy = describe(d.type, d.km, week, phase, input);
       days.push({
-        date,
+        date: d.date,
         week,
-        dayIdx,
+        dayIdx: d.dayIdx,
         phase,
-        type,
+        type: d.type,
         title: copy.title,
         sub: copy.sub,
-        km,
+        km: d.km,
         zone: copy.zone,
       });
     }

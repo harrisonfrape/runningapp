@@ -1,5 +1,14 @@
 import { getDb } from "./db";
-import { addDays, daysBetween, isoDate, mondayOf, paceString, peakVolume } from "./plan";
+import {
+  addDays,
+  daysBetween,
+  isoDate,
+  MARATHON_KM,
+  MAX_LONG_RUN_KM,
+  mondayOf,
+  paceString,
+  peakVolume,
+} from "./plan";
 import { thresholdPaceFromGoal } from "./plan";
 
 export interface ActivityRow {
@@ -126,9 +135,70 @@ export async function bestEffort(userId: number, todayIso: string, days = 120): 
   return best;
 }
 
+/**
+ * Riegel's fatigue exponent. His fitted 1.06 holds well when the two distances
+ * are close, and it is the number every race-equivalence table uses — but it is
+ * fitted across race results, and applying it to a huge extrapolation predicts
+ * a marathon nobody actually runs. Turning a 5 km effort into 42.195 km is a
+ * factor of eight, and over that range the marathon stops being a question of
+ * aerobic power and becomes one of glycogen and durability.
+ *
+ * So the exponent grows with the size of the extrapolation: 1.06 out to double
+ * the distance (a half predicting a full, which is Riegel's own territory),
+ * rising to 1.10 by the time a 5 km is being asked to predict a marathon.
+ */
+export function riegelExponent(fromKm: number, toKm: number): number {
+  if (fromKm <= 0) return 1.06;
+  const ratio = toKm / fromKm;
+  if (ratio <= 2) return 1.06;
+  return Math.min(1.1, 1.06 + (Math.log2(ratio) - 1) * 0.02);
+}
+
 export function riegel(timeS: number, fromKm: number, toKm: number): number {
   if (fromKm <= 0) return Infinity;
-  return timeS * Math.pow(toKm / fromKm, 1.06);
+  return timeS * Math.pow(toKm / fromKm, riegelExponent(fromKm, toKm));
+}
+
+export interface MarathonProjection {
+  /** What the athlete's speed alone is worth over the distance. */
+  rawSeconds: number;
+  /** That time after the endurance the last 10 km actually demands. */
+  adjustedSeconds: number;
+  /** 0-1: how much of the required aerobic base is in the bank. */
+  enduranceReady: number;
+  penaltySeconds: number;
+}
+
+/**
+ * Riegel converts speed at one distance into speed at another. It knows nothing
+ * about whether the athlete has done the work the last 10 km of a marathon
+ * demands, and that is exactly where marathons are lost — a runner with the
+ * speed but not the mileage does not run their equivalence time, they hit the
+ * wall and give back twenty minutes.
+ *
+ * Weekly volume is the strongest training-side predictor of marathon finish
+ * time (Vickers & Vertosick, 2016, who found it materially improved on
+ * performance-only models), and the long run is what makes the distance
+ * survivable. So the projection carries a discount of up to 12% while those are
+ * missing, closing to zero as the athlete reaches the volume their goal needs
+ * and a 32 km long run.
+ */
+export function marathonProjection(
+  rawSeconds: number,
+  fourWeekKm: number,
+  longestKm: number,
+  requiredPeakKm: number,
+): MarathonProjection {
+  const volumeReady = requiredPeakKm > 0 ? clamp01(fourWeekKm / requiredPeakKm) : 0;
+  const longReady = clamp01(longestKm / MAX_LONG_RUN_KM);
+  const enduranceReady = volumeReady * 0.6 + longReady * 0.4;
+  const penaltySeconds = rawSeconds * (1 - enduranceReady) * 0.12;
+  return {
+    rawSeconds,
+    adjustedSeconds: rawSeconds + penaltySeconds,
+    enduranceReady,
+    penaltySeconds,
+  };
 }
 
 export function formatDuration(seconds: number): string {
@@ -293,13 +363,20 @@ export async function assessReadiness(
   const peak = peakVolume(profile.goal_seconds, four.km || 10);
   const daysToRace = Math.max(0, daysBetween(todayIso, profile.race_date));
 
-  const projectedSeconds = best ? riegel(best.moving_time_s, km(best), 42.195) : null;
+  const longestKm = longest ? km(longest) : 0;
+  const rawSeconds = best ? riegel(best.moving_time_s, km(best), MARATHON_KM) : null;
+  // The headline figure is the endurance-adjusted one: what the athlete would
+  // run on today's fitness over the full 42.195 km, not what their speed alone
+  // suggests they might be worth if the mileage were already in the bank.
+  const projection =
+    rawSeconds === null ? null : marathonProjection(rawSeconds, four.km, longestKm, peak);
+  const projectedSeconds = projection ? projection.adjustedSeconds : null;
 
   // Readiness blends speed evidence, volume, long-run endurance and consistency.
   const speed =
     projectedSeconds === null ? 0 : clamp01(profile.goal_seconds / projectedSeconds) * 100;
   const volume = clamp01(four.km / peak) * 100;
-  const endurance = clamp01((longest ? km(longest) : 0) / 32) * 100;
+  const endurance = clamp01(longestKm / MAX_LONG_RUN_KM) * 100;
   const consistency = clamp01(four.runs / 4) * 100;
   const readinessPct = Math.round(
     speed * 0.25 + volume * 0.35 + endurance * 0.25 + consistency * 0.15,
@@ -312,23 +389,37 @@ export async function assessReadiness(
       value: `${km(best).toFixed(1)} km — ${formatDuration(best.moving_time_s)} (${formatPace(best)})`,
     });
     factors.push({
-      label: "Riegel projection from that effort",
-      value: `${formatDuration(projectedSeconds!)} marathon`,
+      label: `Speed alone over ${MARATHON_KM} km`,
+      value: `${formatDuration(projection!.rawSeconds)} (Riegel, exponent ${riegelExponent(
+        km(best),
+        MARATHON_KM,
+      ).toFixed(3)})`,
+    });
+    factors.push({
+      label: "Endurance adjustment for the full distance",
+      value:
+        projection!.penaltySeconds < 30
+          ? "None — the aerobic base is there"
+          : `+${formatDuration(projection!.penaltySeconds)} (${Math.round(
+              projection!.enduranceReady * 100,
+            )}% of the base a ${formatDuration(profile.goal_seconds)} needs)`,
     });
   } else {
     factors.push({ label: "Recent race effort", value: "No run long enough yet" });
   }
   factors.push({
     label: "4-week average volume",
-    value: `${four.km} km/week${four.km < peak * 0.6 ? " — the limiter" : ""}`,
+    value: `${four.km} of ${peak} km/week needed${four.km < peak * 0.6 ? " — the limiter" : ""}`,
   });
   factors.push({
     label: "Longest recent run",
-    value: longest ? `${km(longest).toFixed(1)} km (${formatShortDate(longest.start_date)})` : "—",
+    value: longest
+      ? `${longestKm.toFixed(1)} of ${MAX_LONG_RUN_KM} km (${formatShortDate(longest.start_date)})`
+      : "—",
   });
   factors.push({
     label: "Goal pace vs threshold pace",
-    value: `${paceString(profile.goal_seconds / 42.195)} vs ${paceString(
+    value: `${paceString(profile.goal_seconds / MARATHON_KM)} vs ${paceString(
       await thresholdPace(userId, todayIso, profile.goal_seconds),
     )}`,
   });
@@ -336,13 +427,19 @@ export async function assessReadiness(
   // "Speed is there" is a question about pace, not about the finish time: an
   // athlete whose race pace already beats goal pace is short of endurance, not
   // of speed, even when the projection lands a couple of minutes over target.
-  const goalPace = profile.goal_seconds / 42.195;
+  const goalPace = profile.goal_seconds / MARATHON_KM;
   const speedIsThere =
     projectedSeconds !== null &&
     (projectedSeconds <= profile.goal_seconds * 1.05 ||
       await thresholdPace(userId, todayIso, profile.goal_seconds) < goalPace);
   const note = speedIsThere
-    ? `Your speed already projects ${formatDuration(projectedSeconds!)} — the whole game is volume. Get to four runs a week and hold it, and this projection will firm up fast.`
+    ? `Your speed is worth ${formatDuration(projection!.rawSeconds)} over the distance — the whole game is volume. ${
+        projection!.penaltySeconds >= 30
+          ? `Until the mileage catches up, the last 10 km costs you about ${formatDuration(
+              projection!.penaltySeconds,
+            )} of that.`
+          : "The base is there to hold it."
+      } Get the weekly volume up and this projection firms up fast.`
     : "Speed and endurance both still have room. Volume first, then the sharper sessions do their work.";
 
   return {

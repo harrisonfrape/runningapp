@@ -1,6 +1,14 @@
 export type Provider = "strava" | "garmin";
 
-export type SessionType = "rest" | "easy" | "recovery" | "long" | "hard" | "tempo" | "race";
+export type SessionType =
+  | "rest"
+  | "easy"
+  | "recovery"
+  | "long"
+  | "marathon"
+  | "hard"
+  | "tempo"
+  | "race";
 
 export type Phase = "Prep" | "Base" | "Build" | "Strength" | "Sharpen" | "Peak" | "Taper";
 
